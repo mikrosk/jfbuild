@@ -5,7 +5,9 @@
 // This file has been modified from Ken Silverman's original release
 // by Jonathon Fowler (jf@jonof.id.au)
 
+#ifndef __MINT__
 #define WITHKPLIB
+#endif
 
 #include "build.h"
 #include "cache1d.h"
