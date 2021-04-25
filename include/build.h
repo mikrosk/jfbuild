@@ -186,7 +186,9 @@ typedef struct {
 EXTERN sectortype sector[MAXSECTORS];
 EXTERN walltype wall[MAXWALLS];
 EXTERN spritetype sprite[MAXSPRITES];
+#if USE_POLYMOST && USE_OPENGL
 EXTERN spriteexttype spriteext[MAXSPRITES+MAXUNIQHUDID];
+#endif
 EXTERN int guniqhudid;
 
 EXTERN int spritesortcnt;
