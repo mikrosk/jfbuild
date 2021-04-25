@@ -20,6 +20,11 @@
 static int crctable[256];
 static char kensig[24];
 
+#if !(USE_POLYMOST && USE_OPENGL)
+// scratch space for re-attaching sprites when copying sectors in overheadeditor()
+static spriteexttype spriteext[MAXSPRITES];
+#endif
+
 
 int vel, svel, angvel;
 

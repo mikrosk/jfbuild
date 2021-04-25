@@ -5457,8 +5457,10 @@ int preinitengine(void)
 	assert((intptr_t)&wall[1] - (intptr_t)&wall[0] == sizeof(walltype));
 	assert(sizeof(spritetype) == 44);
 	assert((intptr_t)&sprite[1] - (intptr_t)&sprite[0] == sizeof(spritetype));
+#if USE_POLYMOST && USE_OPENGL
 	assert(sizeof(spriteexttype) == 12);
 	assert((intptr_t)&spriteext[1] - (intptr_t)&spriteext[0] == sizeof(spriteexttype));
+#endif
 
 	if (initsystem()) exit(1);
 
