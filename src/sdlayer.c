@@ -742,10 +742,11 @@ int setsysgamma(float shadergamma, float sysgamma)
 {
 	int r = 0;
 	if (sdl_surface) {
+		if (shadergamma == curshadergamma && sysgamma == cursysgamma) return 0;
 		if (sysgamma < 0.f) r = SDL_SetGamma(1.0, 1.0, 1.0);
 		else r = SDL_SetGamma(sysgamma, sysgamma, sysgamma);
+		if (r == 0) { curshadergamma = shadergamma; cursysgamma = sysgamma; }
 	}
-	if (r == 0) { curshadergamma = shadergamma; cursysgamma = sysgamma; }
 	return r;
 }
 
