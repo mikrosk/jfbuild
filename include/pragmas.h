@@ -3936,8 +3936,87 @@ static inline int boundmulscale(int a, int d, int c)
 #undef by
 #undef _scaler
 
+#if defined(__GNUC__) && defined(__m68k__) && !defined(__mcoldfire__) && USE_ASM
+
+static inline void qinterpolatedown16(void *eax, int ecx, int edx, int esi)
+{
+	register void *_eax __asm__ ("a0") = eax;
+	register int _ecx __asm__ ("d0") = ecx;
+	register int _edx __asm__ ("d1") = edx;
+	register int _esi __asm__ ("d2") = esi;
+	__asm__ volatile (
+		"moveq   #16,%%d3" "\n\t"
+		"tst.l   %%d0" "\n\t"
+		"bne.b   1f" "\n\t"
+		"lsr.l   %%d3,%%d1" "\n\t"
+		"move.l  %%d1,(%%a0)" "\n\t"
+		"bra.b   2f" "\n\t"
+		"1:" "\n\t" // q1
+		"move.l  %%d1,%%d4" "\n\t"
+		"lsr.l   %%d3,%%d4" "\n\t"
+		"add.l   %%d2,%%d1" "\n\t"
+		"move.l  %%d4,(%%a0)+" "\n\t"
+		"subq.l  #1,%%d0" "\n\t"
+		"bne.b   1b" "\n\t"
+		"2:" // end
+		: "=r" (_eax), "=r" (_ecx), "=r" (_edx)
+		: "r" (_eax), "r" (_ecx), "r" (_edx), "r" (_esi)
+		: "d3", "d4", "memory", "cc"
+	);
+}
+
+static inline void qinterpolatedown16short(void *eax, int ecx, int edx, int esi)
+{
+	register void *_eax __asm__ ("a0") = eax;
+	register int _ecx __asm__ ("d0") = ecx;
+	register int _edx __asm__ ("d1") = edx;
+	register int _esi __asm__ ("d2") = esi;
+	__asm__ volatile (
+		"tst.l   %%d0" "\n\t" // TODO can this check be skipped?
+		"beq.b   3f" "\n\t"
+		"moveq   #16,%%d3" "\n\t"
+		"move.l  %%a0,%%d4" "\n\t"
+		"btst    #1,%%d4" "\n\t"
+		"beq.b   1f" "\n\t"
+		"move.l  %%d1,%%d4" "\n\t"
+		"lsr.l   %%d3,%%d4" "\n\t"
+		"add.l   %%d2,%%d1" "\n\t"
+		"move.w  %%d4,(%%a0)+" "\n\t"
+		"subq.l  #1,%%d0" "\n\t"
+		"beq.b   3f" "\n\t"
+		"1:" "\n\t" // q1
+		"subq.l  #2,%%d0" "\n\t"
+		"bpl.b   2f" "\n\t"
+		"lsr.l   %%d3,%%d1" "\n\t"
+		"move.w  %%d1,(%%a0)" "\n\t"
+		"bra.b   3f" "\n\t"
+		"2:" "\n\t" // q2
+		"move.l  %%d1,%%d4" "\n\t"
+		"add.l   %%d2,%%d1" "\n\t"
+		"move.l  %%d1,%%d5" "\n\t"
+		"lsr.l   %%d3,%%d5" "\n\t"
+		"move.w  %%d5,%%d4" "\n\t"
+		"add.l   %%d2,%%d1" "\n\t"
+		"move.l  %%d4,(%%a0)+" "\n\t"
+		"subq.l  #2,%%d0" "\n\t"
+		"bpl.b   2b" "\n\t"
+		"btst    #0,%%d0" "\n\t"
+		"beq.b   3f" "\n\t"
+		"lsr.l   %%d3,%%d1" "\n\t"
+		"move.w  %%d1,(%%a0)" "\n\t"
+		"3:" // end
+		: "=r" (_eax), "=r" (_ecx), "=r" (_edx)
+		: "r" (_eax), "r" (_ecx), "r" (_edx), "r" (_esi)
+		: "d3", "d4", "d5", "memory", "cc"
+	);
+}
+
+#else
+
 void qinterpolatedown16 (void *bufptr, int num, int val, int add);
 void qinterpolatedown16short (void *bufptr, int num, int val, int add);
+
+#endif
 
 void clearbuf(void* d, int c, int a);
 void copybuf(void* s, void* d, int c);

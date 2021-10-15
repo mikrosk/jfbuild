@@ -180,6 +180,7 @@ void copybufreverse(void *S, void *D, int c)
 // Generic C version
 //
 
+#if !(defined(__GNUC__) && defined(__m68k__) && !defined(__mcoldfire__) && USE_ASM)
 void qinterpolatedown16(void *bufptr, int num, int val, int add)
 { // gee, I wonder who could have provided this...
     int i, *lptr = (int *)bufptr;
@@ -191,6 +192,7 @@ void qinterpolatedown16short(void *bufptr, int num, int val, int add)
     int i; short *sptr = (short *)bufptr;
     for(i=0;i<num;i++) { sptr[i] = (short)(val>>16); val += add; }
 }
+#endif
 
 void clearbuf(void *d, int c, int a)
 {
