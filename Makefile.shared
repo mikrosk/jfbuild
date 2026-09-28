@@ -40,6 +40,9 @@ ifndef PLATFORM
 	ifneq (,$(findstring -haiku,$(TARGETMACHINE)))
 		PLATFORM=HAIKU
 	endif
+	ifneq (,$(findstring -mint,$(TARGETMACHINE)))
+		PLATFORM=MINT
+	endif
 endif
 ifndef ARCHITECTURE
 	ARCHITECTURE=UNKNOWN
@@ -64,6 +67,14 @@ ifndef ARCHITECTURE
 	ifneq (,$(findstring i686-,$(TARGETMACHINE)))
 		ARCHITECTURE=X86
 	endif
+endif
+
+# Suffix for executables run on the build host (e.g. bin2c), which may
+# differ from the target's EXESUFFIX when cross-compiling.
+ifeq ($(OS),Windows_NT)
+	HOSTEXESUFFIX=.exe
+else
+	HOSTEXESUFFIX=
 endif
 
 ifeq ($(PLATFORM),WINDOWS)
