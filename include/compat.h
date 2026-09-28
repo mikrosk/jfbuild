@@ -100,7 +100,7 @@ typedef unsigned __int64 uint64_t;
 # define NULL ((void *)0)
 #endif
 
-#if defined(__linux) || defined(__HAIKU__)
+#if defined(__linux) || defined(__HAIKU__) || defined(__MINT__)
 # include <endian.h>
 # if __BYTE_ORDER == __LITTLE_ENDIAN
 #  define B_LITTLE_ENDIAN 1

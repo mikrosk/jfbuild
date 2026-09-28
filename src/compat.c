@@ -348,6 +348,9 @@ typedef struct {
 	WIN32_FIND_DATA fid;
 #else
 	DIR *dir;
+#if defined(__MINT__)
+	char *name;	// MiNTLib has no fstatat().
+#endif
 #endif
 	struct Bdirent info;
 	int status;
@@ -396,6 +399,14 @@ BDIR* Bopendir(const char *name)
 		free(dirr);
 		return NULL;
 	}
+#if defined(__MINT__)
+	dirr->name = strdup(name);
+	if (dirr->name == NULL) {
+		closedir(dirr->dir);
+		free(dirr);
+		return NULL;
+	}
+#endif
 #endif
 
 	dirr->status = 0;
@@ -454,11 +465,24 @@ struct Bdirent*	Breaddir(BDIR *dir)
 	dirr->info.size = 0;
 	dirr->info.mtime = 0;
 
+#if defined(__MINT__)
+	char *path = (char *)malloc(strlen(dirr->name) + 1 + dirr->info.namlen + 1);
+	if (path) {
+		sprintf(path, "%s/%s", dirr->name, de->d_name);
+		if (!stat(path, &st)) {
+			dirr->info.mode = st.st_mode;
+			dirr->info.size = st.st_size;
+			dirr->info.mtime = st.st_mtime;
+		}
+		free(path);
+	}
+#else
 	if (!fstatat(dirfd(dirr->dir), de->d_name, &st, 0)) {
 		dirr->info.mode = st.st_mode;
 		dirr->info.size = st.st_size;
  		dirr->info.mtime = st.st_mtime;
 	}
+#endif
 #endif
 
 	return &dirr->info;
@@ -472,6 +496,9 @@ int Bclosedir(BDIR *dir)
 	FindClose(dirr->hfind);
 #else
 	closedir(dirr->dir);
+#if defined(__MINT__)
+	free(dirr->name);
+#endif
 #endif
 	free(dirr);
 

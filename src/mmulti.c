@@ -237,7 +237,10 @@ int netinit (int portnum)
 			memset(&host, 0, sizeof(host));
 			host.sin6_family = AF_INET6;
 			host.sin6_port = htons(portnum);
+#if !defined(__MINT__)
+			// MiNTLib does not define in6addr_any; the memset above zeroes it anyway.
 			host.sin6_addr = in6addr_any;
+#endif
 			if (bind(mysock, (struct sockaddr *)&host, sizeof(host)) != 0) {
 				// Retry for IPV4.
 				domain = PF_INET;
@@ -339,7 +342,7 @@ int netsend (int other, void *dabuf, int bufsiz) //0:buffer full... can't send
 	memset(msg_control, 0, sizeof(msg_control));
 
 	cmsg = CMSG_FIRSTHDR(&msg);
-#if !defined(__APPLE__) && !defined(__HAIKU__)
+#if !defined(__APPLE__) && !defined(__HAIKU__) && !defined(__MINT__)
 	// OS X doesn't implement setting the UDP4 source. We'll
 	// just have to cross our fingers.
 	if (replyfrom4[other].s_addr != INADDR_ANY) {

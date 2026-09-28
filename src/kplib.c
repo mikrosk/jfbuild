@@ -32,6 +32,10 @@ credits.
 // For dirent.h DT_ macros.
 #define _DEFAULT_SOURCE
 #endif
+#if defined(__MINT__)
+// MiNTLib ignores _DEFAULT_SOURCE in strict ISO C mode.
+#define _BSD_SOURCE
+#endif
 
 #include <string.h>
 #include <fcntl.h>
@@ -3016,7 +3020,12 @@ int kzfindfile (char *filnam)
 			if ((findata = readdir(hfind)) == NULL)
 				{ closedir(hfind); hfind = NULL; if (!kzhashbuf) return 0; srchstat = kzlastfnam; break; }
 			i = wildstpathleng;
+#if defined(__MINT__)
+			strcpy(&filnam[i],findata->d_name);
+			if (stat(filnam, &st)) continue;
+#else
 			if (fstatat(dirfd(hfind), findata->d_name, &st, 0)) continue;
+#endif
 			if (st.st_mode & S_IFDIR)
 				{ if (findata->d_name[0] == '.' && !findata->d_name[1]) continue; } //skip .
 			else if ((st.st_mode & S_IFREG) || (st.st_mode & S_IFLNK))
