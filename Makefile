@@ -174,7 +174,7 @@ ENGINEOBJS+= $(SRC)/version.$o
 endif
 
 UTILS=kextract$(EXESUFFIX) kgroup$(EXESUFFIX) klist$(EXESUFFIX) transpal$(EXESUFFIX) arttool$(EXESUFFIX)
-BUILDUTILS=bin2c$(EXESUFFIX)
+BUILDUTILS=bin2c$(HOSTEXESUFFIX)
 
 .PHONY: clean veryclean all utils libs enginelib editorlib kenbuild
 all: libs utils kenbuild
@@ -208,7 +208,7 @@ wad2map$(EXESUFFIX): $(TOOLS)/wad2map.$o $(ENGINELIB)
 
 # These tools are only used at build time and should be compiled
 # using the host toolchain rather than any cross-compiler.
-bin2c$(EXESUFFIX): $(TOOLS)/bin2c.cc
+bin2c$(HOSTEXESUFFIX): $(TOOLS)/bin2c.cc
 	$(HOSTCXX) $(HOSTCXXFLAGS) -o $@ $^
 
 # DEPENDENCIES
@@ -230,8 +230,8 @@ $(SRC)/%.$o: $(SRC)/%.cpp
 $(SRC)/%.$o: $(SRC)/%.m
 	$(CC) $(CPPFLAGS) $(OURCPPFLAGS) $(CFLAGS) $(OURCFLAGS) -c $< -o $@
 
-$(SRC)/%.c: $(SRC)/%.glsl | bin2c$(EXESUFFIX)
-	./bin2c$(EXESUFFIX) -text $< default_$*_glsl > $@
+$(SRC)/%.c: $(SRC)/%.glsl | bin2c$(HOSTEXESUFFIX)
+	./bin2c$(HOSTEXESUFFIX) -text $< default_$*_glsl > $@
 
 $(LIBSQUISH)/%.$o: $(LIBSQUISH)/%.cpp
 	$(CXX) $(CPPFLAGS) $(OURCPPFLAGS) $(CXXFLAGS) $(OURCXXFLAGS) -O2 -c $< -o $@

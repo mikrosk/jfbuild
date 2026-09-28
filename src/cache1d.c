@@ -324,6 +324,9 @@ int findfrompath(const char *fn, char **where)
 	pfn = (char *)malloc(allocsiz);
 	if (!pfn) { free(ffn); return -1; }
 
+#if !defined(__MINT__)
+	// On MiNT the application adds the current directory to the path
+	// stack itself, so that it can give other paths priority over it.
 	strcpy(pfn, "./");
 	strcat(pfn, ffn);
 	if (access(pfn, F_OK) >= 0) {
@@ -331,7 +334,8 @@ int findfrompath(const char *fn, char **where)
 		free(ffn);
 		return 0;
 	}
-	
+#endif
+
 	for (sp = searchpathhead; sp; sp = sp->next) {
 		strcpy(pfn, sp->path);
 		strcat(pfn, ffn);
