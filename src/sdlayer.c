@@ -6,11 +6,7 @@
 
 #include "build.h"
 
-#if defined(__APPLE__) && defined(HAVE_OSX_FRAMEWORKS)
-# include <SDL2/SDL.h>
-#else
-# include "SDL.h"
-#endif
+#include "SDL.h"
 
 #if (SDL_MAJOR_VERSION != 2)
 #  error This must be built with SDL2
@@ -26,12 +22,6 @@
 #include "a.h"
 #include "osd.h"
 
-#if defined(__APPLE__)
-# include "osxbits.h"
-#endif
-#if defined(HAVE_GTK)
-# include "gtkbits.h"
-#endif
 
 static int backgroundidle = 0;
 static char apptitle[256] = "Build Engine";
@@ -94,12 +84,6 @@ int wm_msgbox(const char *name, const char *fmt, ...)
 	do {
 		rv = 0;
 
-#if defined(HAVE_GTK)
-		if (wmgtk_msgbox(name, buf) >= 0) {
-			rv = 1;
-			break;
-		}
-#endif
 		if (SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, name, buf, sdl_window) >= 0) {
 			rv = 1;
 			break;
@@ -146,11 +130,6 @@ int wm_ynbox(const char *name, const char *fmt, ...)
 	do {
 		rv = 0;
 
-#if defined(HAVE_GTK)
-		if ((rv = wmgtk_ynbox(name, buf)) >= 0) {
-			break;
-		}
-#endif
 		if (SDL_ShowMessageBox(&msgbox, &rv) >= 0) {
 			rv = (rv == 1);
 			break;
@@ -168,35 +147,14 @@ int wm_ynbox(const char *name, const char *fmt, ...)
 
 int wm_filechooser(const char *initialdir, const char *initialfile, const char *type, int foropen, char **choice)
 {
-#if (defined(__APPLE__) && defined(HAVE_OSX_FRAMEWORKS)) || defined(HAVE_GTK)
-    int rv;
-    if (mouseacquired && moustat) {
-        SDL_SetRelativeMouseMode(SDL_FALSE);
-    }
-#if defined(__APPLE__) && defined(HAVE_OSX_FRAMEWORKS)
-    rv = wmosx_filechooser(initialdir, initialfile, type, foropen, choice);
-#elif defined(HAVE_GTK)
-    rv = wmgtk_filechooser(initialdir, initialfile, type, foropen, choice);
-#endif
-    SDL_RaiseWindow(sdl_window);
-    if (mouseacquired && moustat) {
-        SDL_SetRelativeMouseMode(SDL_TRUE);
-    }
-    return rv;
-#else
-    (void)initialdir; (void)initialfile; (void)type; (void)foropen; (void)choice;
-#endif
+	(void)initialdir; (void)initialfile; (void)type; (void)foropen; (void)choice;
 	return -1;
 }
 
 int wm_idle(void *ptr)
 {
-#if defined(HAVE_GTK)
-    return wmgtk_idle(ptr);
-#else
-    (void)ptr;
-    return 0;
-#endif
+	(void)ptr;
+	return 0;
 }
 
 void wm_setapptitle(const char *name)
@@ -205,9 +163,6 @@ void wm_setapptitle(const char *name)
 		Bstrncpy(apptitle, name, sizeof(apptitle)-1);
 		apptitle[ sizeof(apptitle)-1 ] = 0;
 	}
-#if defined HAVE_GTK
-	wmgtk_setapptitle(apptitle);
-#endif
 }
 
 void wm_setwindowtitle(const char *name)
@@ -250,37 +205,17 @@ int main(int argc, char *argv[])
 
 	buildkeytranslationtable();
 
-	// SDL must be initialised before GTK or else crashing will ensue.
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER)) {
 		buildprintf("Early initialisation of SDL failed! (%s)\n", SDL_GetError());
 		return 1;
 	}
 
-#ifdef HAVE_GTK
-	wmgtk_init(&argc, &argv);
-#endif
 
-#ifdef __APPLE__
-	// consume Xcode's "-NSDocumentRevisionsDebugMode xx" parameter
-	_buildargv = calloc(argc+1, sizeof(char *));
-	for (r = _buildargc = 0; r < argc; r++) {
-		if (strcmp(argv[r], "-NSDocumentRevisionsDebugMode") == 0) {
-			r++;
-		} else {
-			_buildargv[_buildargc++] = argv[r];
-		}
-	}
-	_buildargv[_buildargc] = 0;
-#else
 	_buildargc = argc;
 	_buildargv = (const char **)argv;
-#endif
 
 	startwin_open();
 	baselayer_init();
-
-	// This avoids doubled character input in the (OSX) startup window's edit fields.
-	SDL_EventState(SDL_TEXTINPUT, SDL_IGNORE);
 
 	loadappicon();
 
@@ -288,14 +223,8 @@ int main(int argc, char *argv[])
 
 	if (sdl_appicon) SDL_FreeSurface(sdl_appicon);
 
-#ifdef __APPLE__
-	free(_buildargv);
-#endif
 
 	startwin_close();
-#ifdef HAVE_GTK
-	wmgtk_exit();
-#endif
 
 	SDL_Quit();
 
@@ -1028,7 +957,6 @@ int setsysgamma(float shadergamma, float sysgamma)
 
 static void loadappicon(void)
 {
-#if !defined(__APPLE__) || (defined(__APPLE__) && !defined(HAVE_OSX_FRAMEWORKS))
 	extern const unsigned char appicon_bmp[];
 	extern const int appicon_bmp_size;
 	SDL_RWops *rwops;
@@ -1043,7 +971,6 @@ static void loadappicon(void)
 	if (!sdl_appicon) {
 		debugprintf("loadappicon: error creating appicon surface: %s\n", SDL_GetError());
 	}
-#endif
 }
 
 //
@@ -1098,18 +1025,6 @@ int handleevents(void)
 				}
 				// else, fallthrough
 			case SDL_KEYDOWN:
-#ifdef __APPLE__
-				// For Mac keyboards that removed the Help key, which shared a scancode
-				// with PC Insert, pretend Cmd+Delete is insert when in the editor.
-				if (ev.key.keysym.sym == SDLK_DELETE && ev.key.keysym.mod == KMOD_RGUI) {
-					extern short editstatus;
-					if (editstatus) {
-						ev.key.keysym.sym = SDLK_INSERT;
-						ev.key.keysym.scancode = SDL_SCANCODE_INSERT;
-						ev.key.keysym.mod &= ~KMOD_RGUI;
-					}
-				}
-#endif
 				code = keytranslation[ev.key.keysym.scancode].normal;
 				control = keytranslation[ev.key.keysym.scancode].controlchar;
 
