@@ -4,8 +4,9 @@ ENGINELIB=libengine.a
 EDITORLIB=libbuild.a
 
 SDL2CONFIG?=$(shell which sdl2-config || which false)
+SDLCONFIG?=$(shell which sdl-config || which false)
 PKGCONFIG?=$(shell which pkg-config || which false)
-export SDL2CONFIG PKGCONFIG
+export SDL2CONFIG SDLCONFIG PKGCONFIG
 
 BUILDCFLAGS=
 BUILDCXXFLAGS=
@@ -82,7 +83,7 @@ ifeq ($(PLATFORM),WINDOWS)
 	EXESUFFIX=.exe
 	BUILDLDFLAGS+= -lmingwex -lwinmm -lws2_32 -lcomctl32 -lcomdlg32 -luxtheme -lxinput9_1_0
 else
-	RENDERTYPE=SDL
+	RENDERTYPE ?= SDL
 	EXESUFFIX=
 
 	ifeq ($(PLATFORM),DARWIN)
@@ -111,6 +112,14 @@ ifeq ($(RENDERTYPE),SDL)
 		else
 			HAVE_GTK=0
 		endif
+	endif
+endif
+ifeq ($(RENDERTYPE),SDL1)
+	ifneq ($(SDLCONFIG),)
+		SDLCONFIG_CFLAGS=$(shell $(SDLCONFIG) --cflags)
+		SDLCONFIG_LIBS=$(shell $(SDLCONFIG) --libs)
+	else
+		$(error No $(SDLCONFIG) could be found)
 	endif
 endif
 ifeq ($(RENDERTYPE),WIN)

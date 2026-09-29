@@ -159,6 +159,11 @@ ifeq ($(RENDERTYPE),SDL)
 		ENGINEOBJS+= $(SRC)/startwin_stub.$o
 	endif
 endif
+ifeq ($(RENDERTYPE),SDL1)
+	ENGINEOBJS+= $(SRC)/sdlayer.$o $(SRC)/startwin_stub.$o
+	OURCFLAGS+= $(SDLCONFIG_CFLAGS)
+	OURLDFLAGS+= $(SDLCONFIG_LIBS)
+endif
 ifeq ($(RENDERTYPE),WIN)
 	ENGINEOBJS+= $(SRC)/winlayer.$o
 	EDITOROBJS+= $(SRC)/startwin_editor.$o
