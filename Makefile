@@ -89,7 +89,9 @@ ENGINEOBJS= \
 	$(SRC)/smalltextfont.$o
 
 ifneq (0,$(USE_ASM))
+ifneq ($(ARCHITECTURE),M68K)
 	ENGINEOBJS+= $(SRC)/a.$o
+endif
 endif
 
 ifneq ($(USE_OPENGL),0)

@@ -3624,6 +3624,228 @@ static __inline void swapchar2(void *a, void *b, int s)
 #define wo(x)	((int16_t)(x))		// word cast
 #define by(x)	((int8_t)(x))		// byte cast
 
+#if defined(__GNUC__) && defined(__m68k__) && defined(__HAVE_68881__) && USE_ASM
+
+//
+// m68k with FPU
+//
+// The 68060 lacks the 64-bit forms of muls.l and divs.l, so products are
+// done with the 32-bit muls.l and fall back to a full 64-bit product only
+// on overflow. Divisions are done by the FPU in extended precision, which
+// holds a 64-bit dividend exactly.
+//
+
+extern const float m68k_pow2[64];
+
+// Signed 32x32->64 product from 16x16->32 partial products
+static inline void m68k_smul64(int a, int b, int *hi, unsigned int *lo)
+{
+	int h, t1, t2;
+	unsigned int l;
+	__asm__ ("move.l %4,%1\n\t"
+		"move.l %5,%2\n\t"
+		"move.l %4,%0\n\t"
+		"move.l %5,%3\n\t"
+		"swap %0\n\t"
+		"swap %3\n\t"
+		"mulu.w %0,%2\n\t"		// ah*bl
+		"mulu.w %3,%1\n\t"		// al*bh
+		"mulu.w %3,%0\n\t"		// ah*bh
+		"move.l %4,%3\n\t"
+		"mulu.w %5,%3\n\t"		// al*bl
+		"add.l %2,%1\n\t"		// middle sum, carry into bit 48
+		"moveq #0,%2\n\t"
+		"addx.l %2,%2\n\t"
+		"swap %2\n\t"
+		"add.l %2,%0\n\t"
+		"move.l %1,%2\n\t"
+		"clr.w %2\n\t"
+		"swap %2\n\t"
+		"swap %1\n\t"
+		"clr.w %1\n\t"
+		"add.l %3,%1\n\t"
+		"addx.l %2,%0\n\t"
+		"move.l %4,%2\n\t"		// signed correction of the high half
+		"add.l %2,%2\n\t"
+		"subx.l %2,%2\n\t"
+		"and.l %5,%2\n\t"
+		"sub.l %2,%0\n\t"
+		"move.l %5,%2\n\t"
+		"add.l %2,%2\n\t"
+		"subx.l %2,%2\n\t"
+		"and.l %4,%2\n\t"
+		"sub.l %2,%0"
+		: "=&d" (h), "=&d" (l), "=&d" (t1), "=&d" (t2) : "d" (a), "d" (b) : "cc");
+	*hi = h;
+	*lo = l;
+}
+
+// hi:lo += hi2:lo2
+static inline void m68k_add64(int *hi, unsigned int *lo, int hi2, unsigned int lo2)
+{
+	int h = *hi;
+	unsigned int l = *lo;
+	__asm__ ("add.l %3,%1\n\t"
+		"addx.l %2,%0"
+		: "+d" (h), "+d" (l) : "d" (hi2), "d" (lo2) : "cc");
+	*hi = h;
+	*lo = l;
+}
+
+// Bits n..n+31 of the 64-bit value hi:lo
+static inline int m68k_shr64(int hi, unsigned int lo, int n)
+{
+	if (n == 0) return (int)lo;
+	if (n < 32) return (int)(((unsigned int)hi << (32 - n)) | (lo >> n));
+	return hi >> (n - 32);
+}
+
+static inline int m68k_mulscale_wide(int a, int b, int n)
+{
+	int hi;
+	unsigned int lo;
+
+	m68k_smul64(a, b, &hi, &lo);
+	return m68k_shr64(hi, lo, n);
+}
+
+static inline int m68k_dmulscale_wide(int a, int b, int c, int d, int n)
+{
+	int h1, h2;
+	unsigned int l1, l2;
+
+	m68k_smul64(a, b, &h1, &l1);
+	m68k_smul64(c, d, &h2, &l2);
+	m68k_add64(&h1, &l1, h2, l2);
+	return m68k_shr64(h1, l1, n);
+}
+
+static inline int m68k_tmulscale_wide(int a, int b, int c, int d, int e, int f, int n)
+{
+	int h1, h2;
+	unsigned int l1, l2;
+
+	m68k_smul64(a, b, &h1, &l1);
+	m68k_smul64(c, d, &h2, &l2);
+	m68k_add64(&h1, &l1, h2, l2);
+	m68k_smul64(e, f, &h2, &l2);
+	m68k_add64(&h1, &l1, h2, l2);
+	return m68k_shr64(h1, l1, n);
+}
+
+static inline int m68k_boundmulscale(int a, int b, int n)
+{
+	int hi;
+	unsigned int lo;
+	int64_t p;
+
+	m68k_smul64(a, b, &hi, &lo);
+	p = (int64_t)(((uint64_t)(unsigned int)hi << 32) | lo) >> n;
+	if (p >= INT_MAX) p = INT_MAX;
+	if (p < INT_MIN) p = INT_MIN;
+	return (int)p;
+}
+
+// The overflow flags of the products and sums are collected with svs,
+// as gcc supports neither asm goto with outputs nor flag outputs on m68k.
+
+static inline __attribute__((always_inline)) int m68k_mulscale(int a, int b, int n)
+{
+	int p = a;
+	char v;
+	__asm__ ("muls.l %2,%0\n\t"
+		"svs %1"
+		: "+d" (p), "=d" (v) : "dmi" (b) : "cc");
+	if (__builtin_expect(v, 0)) return m68k_mulscale_wide(a, b, n);
+	return p >> (n < 32 ? n : 31);
+}
+
+static inline __attribute__((always_inline)) int m68k_dmulscale(int a, int b, int c, int d, int n)
+{
+	int p = a, q = c;
+	char v, w;
+	__asm__ ("muls.l %4,%0\n\t"
+		"svs %2\n\t"
+		"muls.l %5,%1\n\t"
+		"bvs 1f\n\t"
+		"add.l %1,%0\n"
+		"1:\tsvs %3\n\t"
+		"or.b %3,%2"
+		: "+&d" (p), "+&d" (q), "=&d" (v), "=&d" (w) : "dmi" (b), "dmi" (d) : "cc");
+	if (__builtin_expect(v, 0)) return m68k_dmulscale_wide(a, b, c, d, n);
+	return p >> (n < 32 ? n : 31);
+}
+
+static inline __attribute__((always_inline)) int m68k_tmulscale(int a, int b, int c, int d, int e, int f, int n)
+{
+	int p = a, q = c, r = e;
+	char v, w;
+	__asm__ ("muls.l %5,%0\n\t"
+		"svs %3\n\t"
+		"muls.l %6,%1\n\t"
+		"svs %4\n\t"
+		"or.b %4,%3\n\t"
+		"muls.l %7,%2\n\t"
+		"bvs 1f\n\t"
+		"add.l %1,%0\n\t"
+		"bvs 1f\n\t"
+		"add.l %2,%0\n"
+		"1:\tsvs %4\n\t"
+		"or.b %4,%3"
+		: "+&d" (p), "+&d" (q), "+&d" (r), "=&d" (v), "=&d" (w) : "dmi" (b), "dmi" (d), "dmi" (f) : "cc");
+	if (__builtin_expect(v, 0)) return m68k_tmulscale_wide(a, b, c, d, e, f, n);
+	return p >> (n < 32 ? n : 31);
+}
+
+// (a * 2^n) / b, truncated towards zero like the C division
+static inline __attribute__((always_inline)) int m68k_divscale(int a, int b, int n)
+{
+	int q;
+	__asm__ ("fmove.l %1,%%fp0\n\t"
+		"fmul.s %3,%%fp0\n\t"
+		"fdiv.l %2,%%fp0\n\t"
+		"fintrz.x %%fp0,%%fp0\n\t"
+		"fmove.l %%fp0,%0"
+		: "=d" (q) : "dmi" (a), "dmi" (b), "m" (m68k_pow2[n & 63]) : "fp0");
+	return q;
+}
+
+// (a * b) / c, truncated towards zero like the C division
+static inline __attribute__((always_inline)) int m68k_scale(int a, int b, int c)
+{
+	int q;
+	__asm__ ("fmove.l %1,%%fp0\n\t"
+		"fmul.l %2,%%fp0\n\t"
+		"fdiv.l %3,%%fp0\n\t"
+		"fintrz.x %%fp0,%%fp0\n\t"
+		"fmove.l %%fp0,%0"
+		: "=d" (q) : "dmi" (a), "dmi" (b), "dmi" (c) : "fp0");
+	return q;
+}
+
+#define _scaler(a) \
+static inline int mulscale##a(int eax, int edx) \
+{ \
+	return m68k_mulscale(eax, edx, a); \
+} \
+\
+static inline int divscale##a(int eax, int ebx) \
+{ \
+	return m68k_divscale(eax, ebx, a); \
+} \
+\
+static inline int dmulscale##a(int eax, int edx, int esi, int edi) \
+{ \
+	return m68k_dmulscale(eax, edx, esi, edi, a); \
+} \
+\
+static inline int tmulscale##a(int eax, int edx, int ebx, int ecx, int esi, int edi) \
+{ \
+	return m68k_tmulscale(eax, edx, ebx, ecx, esi, edi, a); \
+} \
+
+#else
+
 #define _scaler(a) \
 static inline int mulscale##a(int eax, int edx) \
 { \
@@ -3644,6 +3866,8 @@ static inline int tmulscale##a(int eax, int edx, int ebx, int ecx, int esi, int 
 { \
 	return dw(((qw(eax) * qw(edx)) + (qw(ebx) * qw(ecx)) + (qw(esi) * qw(edi))) >> a); \
 } \
+
+#endif
 
 _scaler(1)	_scaler(2)	_scaler(3)	_scaler(4)
 _scaler(5)	_scaler(6)	_scaler(7)	_scaler(8)
@@ -3681,6 +3905,13 @@ static inline int kmin(int a, int b) { if ((signed int)a < (signed int)b) return
 static inline int kmax(int a, int b) { if ((signed int)a < (signed int)b) return b; return a; }
 
 static inline int sqr(int eax) { return (eax) * (eax); }
+#if defined(__GNUC__) && defined(__m68k__) && defined(__HAVE_68881__) && USE_ASM
+static inline int scale(int eax, int edx, int ecx) { return m68k_scale(eax, edx, ecx); }
+static inline int mulscale(int eax, int edx, int ecx) { return m68k_mulscale(eax, edx, by(ecx)); }
+static inline int divscale(int eax, int ebx, int ecx) { return m68k_divscale(eax, ebx, by(ecx)); }
+static inline int dmulscale(int eax, int edx, int esi, int edi, int ecx) { return m68k_dmulscale(eax, edx, esi, edi, by(ecx)); }
+static inline int boundmulscale(int a, int d, int c) { return m68k_boundmulscale(a, d, c); }
+#else
 static inline int scale(int eax, int edx, int ecx) { return dw((qw(eax) * qw(edx)) / qw(ecx)); }
 static inline int mulscale(int eax, int edx, int ecx) { return dw((qw(eax) * qw(edx)) >> by(ecx)); }
 static inline int divscale(int eax, int ebx, int ecx) { return dw((qw(eax) << by(ecx)) / qw(ebx)); }
@@ -3694,6 +3925,7 @@ static inline int boundmulscale(int a, int d, int c)
     if (p < INT_MIN) p = INT_MIN;
     return((int)p);
 }
+#endif
 
 #undef qw
 #undef dw
