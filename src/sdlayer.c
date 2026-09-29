@@ -25,7 +25,6 @@
 #include "pragmas.h"
 #include "a.h"
 #include "osd.h"
-#include "glbuild_priv.h"
 
 #if defined(__APPLE__)
 # include "osxbits.h"
@@ -57,12 +56,6 @@ static struct displayinfo {
 } *displays;
 int displaycnt;
 
-#if USE_OPENGL
-static SDL_GLContext sdl_glcontext;
-static glbuild8bit gl8bit;
-
-static int set_glswapinterval(const osdfuncparm_t *parm);
-#endif
 
 // input
 static char keynames[256][24];
@@ -330,19 +323,6 @@ int initsystem(void)
 
 	atexit(uninitsystem);
 
-#if USE_OPENGL
-	if (getenv("BUILD_NOGL")) {
-		buildputs("OpenGL disabled.\n");
-		glunavailable = 1;
-	} else {
-		glunavailable = loadgldriver(getenv("BUILD_GLDRV"));
-		if (glunavailable) {
-			buildputs("Failed loading OpenGL driver. GL modes will be unavailable.\n");
-		}
-	}
-
-	OSD_RegisterFunction("glswapinterval", "glswapinterval: frame swap interval for OpenGL modes. 0 = no vsync, -1 = adaptive, max 8", set_glswapinterval);
-#endif
 	if (getenv("BUILD_USESDLRENDERER")) {
 		buildputs("Will use SDL renderer if OpenGL is not available.\n");
 		usesdlrenderer = 1;
@@ -362,10 +342,6 @@ void uninitsystem(void)
 	uninittimer();
 
 	shutdownvideo();
-#if USE_OPENGL
-	glbuild_unloadfunctions();
-	unloadgldriver();
-#endif
 
 	if (displays) {
 		free(displays);
@@ -727,7 +703,7 @@ static void enumdisplays(void)
 //
 void getvalidmodes(void)
 {
-	int i, n, maxx, maxy;
+	int i, maxx, maxy;
 
 	if (validmodecnt) return;
 
@@ -735,17 +711,6 @@ void getvalidmodes(void)
 	for (i=0; i<displaycnt; i++) {
 		// 8-bit modes upsample to the desktop.
 		addstandardvalidmodes(displays[i].mode.w, displays[i].mode.h, 8, 1, i, 0, -1);
-#if USE_POLYMOST && USE_OPENGL
-		if (glunavailable) continue;
-
-		n = SDL_GetNumDisplayModes(displays[i].index);
-		for (int j=0; j<n; j++) {
-			SDL_DisplayMode mode;
-			SDL_GetDisplayMode(displays[i].index, j, &mode);
-			if (SDL_BITSPERPIXEL(mode.format) <= 8) continue;
-			addvalidmode(mode.w, mode.h, SDL_BITSPERPIXEL(mode.format), 1, i, mode.refresh_rate, j);
-		}
-#endif
 	}
 
 	// Windowed modes
@@ -755,11 +720,6 @@ void getvalidmodes(void)
 		maxy = max(maxy, displays[i].usablebounds.h);
 	}
 	addstandardvalidmodes(maxx, maxy, 8, 0, 0, 0, -1);
-#if USE_POLYMOST && USE_OPENGL
-	if (!glunavailable) {
-		addstandardvalidmodes(maxx, maxy, SDL_BITSPERPIXEL(displays[0].mode.format), 0, 0, 0, -1);
-	}
-#endif
 
 	sortvalidmodes();
 }
@@ -771,18 +731,6 @@ static void shutdownvideo(void)
 		frame = NULL;
 	}
 
-#if USE_OPENGL
-	if (!glunavailable) {
-		glbuild_delete_8bit_shader(&gl8bit);
-	}
-	if (sdl_glcontext) {
-#if USE_POLYMOST
-		polymost_glreset();
-#endif
-		SDL_GL_DeleteContext(sdl_glcontext);
-		sdl_glcontext = NULL;
-	}
-#endif
 
 	if (sdl_texture) {
 		SDL_DestroyTexture(sdl_texture);
@@ -841,32 +789,6 @@ int setvideomode(int xdim, int ydim, int bitspp, int fullsc)
 	do {
 		flags = SDL_WINDOW_HIDDEN;
 
-#if USE_OPENGL
-		if (!glunavailable) {
-#if (USE_OPENGL == USE_GLES2)
-			SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-			SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-			SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
-#elif (USE_OPENGL == USE_GL3)
-			SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-			SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-			SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
-#else
-			SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
-			SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-			SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
-#endif
-
-			SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);
-			SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-#if USE_POLYMOST
-			SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, glmultisample > 0);
-			SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, glmultisample ? (1 << glmultisample) : 0);
-#endif
-
-			flags |= SDL_WINDOW_OPENGL;
-		}
-#endif
 
 		// Centre on whichever display is given.
 		winx = displays[display].bounds.x + (displays[display].bounds.w - xdim) / 2;
@@ -881,13 +803,6 @@ int setvideomode(int xdim, int ydim, int bitspp, int fullsc)
 		if (!sdl_window) {
 			buildprintf("Error creating window: %s\n", SDL_GetError());
 
-#if USE_POLYMOST && USE_OPENGL
-			if (glmultisample > 0) {
-				buildprintf("Retrying without multisampling.\n");
-				glmultisample = 0;
-				continue;
-			}
-#endif
 
 			return -1;
 		} else if ((fullsc&255) && bitspp>8) {
@@ -909,63 +824,36 @@ int setvideomode(int xdim, int ydim, int bitspp, int fullsc)
 		// Round up to a multiple of 4.
 		pitch = (((xdim|1) + 4) & ~3);
 
-#if USE_OPENGL
-		if (glunavailable) {
-#endif
-			if (usesdlrenderer) {
-				// 8-bit software with no GL shader blitting goes via the SDL rendering apparatus.
-				SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
+		if (usesdlrenderer) {
+			// 8-bit software with no GL shader blitting goes via the SDL rendering apparatus.
+			SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
 
-				sdl_renderer = SDL_CreateRenderer(sdl_window, -1, SDL_RENDERER_PRESENTVSYNC);
-				if (!sdl_renderer) {
-					buildprintf("Error creating renderer: %s\n", SDL_GetError());
-					return -1;
-				}
-				SDL_SetRenderDrawColor(sdl_renderer, 0, 0, 0, 255);
-
-				sdl_texture = SDL_CreateTexture(sdl_renderer,
-					B_LITTLE_ENDIAN ? SDL_PIXELFORMAT_ABGR8888 : SDL_PIXELFORMAT_RGBA8888,
-					SDL_TEXTUREACCESS_STREAMING, xdim, ydim);
-				if (!sdl_texture) {
-					buildprintf("Error creating texture: %s\n", SDL_GetError());
-					return -1;
-				}
-			} else {
-				// 8-bit software with no GL shader blitting goes via the SDL rendering apparatus.
-				sdl_surface = SDL_CreateRGBSurface(0, xdim, ydim, 32,
-					255l<<(8*offsetof(palette_t, r)),
-					255l<<(8*offsetof(palette_t, g)),
-					255l<<(8*offsetof(palette_t, b)),
-					0);
-				if (!sdl_surface) {
-					buildprintf("Error creating surface: %s\n", SDL_GetError());
-					return -1;
-				}
+			sdl_renderer = SDL_CreateRenderer(sdl_window, -1, SDL_RENDERER_PRESENTVSYNC);
+			if (!sdl_renderer) {
+				buildprintf("Error creating renderer: %s\n", SDL_GetError());
+				return -1;
 			}
-#if USE_OPENGL
+			SDL_SetRenderDrawColor(sdl_renderer, 0, 0, 0, 255);
+
+			sdl_texture = SDL_CreateTexture(sdl_renderer,
+				B_LITTLE_ENDIAN ? SDL_PIXELFORMAT_ABGR8888 : SDL_PIXELFORMAT_RGBA8888,
+				SDL_TEXTUREACCESS_STREAMING, xdim, ydim);
+			if (!sdl_texture) {
+				buildprintf("Error creating texture: %s\n", SDL_GetError());
+				return -1;
+			}
 		} else {
-			// Prepare the GLSL shader for 8-bit blitting.
-			int winx = xdim, winy = ydim;
-
-			sdl_glcontext = SDL_GL_CreateContext(sdl_window);
-			if (!sdl_glcontext) {
-				buildprintf("Error creating OpenGL context: %s\n", SDL_GetError());
-				glunavailable = 1;
-			} else if (glbuild_init()) {
-				glunavailable = 1;
-			} else {
-				SDL_GL_GetDrawableSize(sdl_window, &winx, &winy);
-				if (glbuild_prepare_8bit_shader(&gl8bit, xdim, ydim, pitch, winx, winy) < 0) {
-					glunavailable = 1;
-				}
-			}
-			if (glunavailable) {
-				// Try again but without OpenGL.
-				buildputs("Falling back to non-OpenGL render.\n");
-				return setvideomode(xdim, ydim, bitspp, fullsc);
+			// 8-bit software with no GL shader blitting goes via the SDL rendering apparatus.
+			sdl_surface = SDL_CreateRGBSurface(0, xdim, ydim, 32,
+				255l<<(8*offsetof(palette_t, r)),
+				255l<<(8*offsetof(palette_t, g)),
+				255l<<(8*offsetof(palette_t, b)),
+				0);
+			if (!sdl_surface) {
+				buildprintf("Error creating surface: %s\n", SDL_GetError());
+				return -1;
 			}
 		}
-#endif
 
 		frame = (unsigned char *) malloc(pitch * ydim);
 		if (!frame) {
@@ -985,28 +873,7 @@ int setvideomode(int xdim, int ydim, int bitspp, int fullsc)
 		}
 
 	} else {
-#if USE_OPENGL
-		sdl_glcontext = SDL_GL_CreateContext(sdl_window);
-		if (!sdl_glcontext) {
-			buildprintf("Error creating OpenGL context: %s\n", SDL_GetError());
-			return -1;
-		}
-
-		if (glbuild_init()) {
-			shutdownvideo();
-			return -1;
-		}
-#if USE_POLYMOST
-		polymost_glreset();
-#endif
-
-		frameplace = 0;
-		bytesperline = 0;
-		imageSize = 0;
-		numpages = 127;
-#else
 		return -1;
-#endif
 	}
 
 	SDL_ShowWindow(sdl_window);
@@ -1017,18 +884,6 @@ int setvideomode(int xdim, int ydim, int bitspp, int fullsc)
 	bpp = bitspp;
 	fullscreen = fullsc;
 
-#if USE_OPENGL
-	if (sdl_glcontext) {
-		if (SDL_GL_SetSwapInterval(glswapinterval) < 0) {
-			buildputs("note: OpenGL swap interval could not be changed\n");
-		}
-	}
-	if (bitspp == 8 && !glunavailable) {
-		// The drawable size may have changed once the window was shown.
-		SDL_GL_GetDrawableSize(sdl_window, &winx, &winy);
-		glbuild_update_window_size(&gl8bit, winx, winy);
-	}
-#endif
 
 	videomodereset = 0;
 	if (baselayer_videomodedidchange) baselayer_videomodedidchange();
@@ -1063,17 +918,6 @@ const char *getdisplayname(int display)
 //
 void showframe(void)
 {
-#if USE_OPENGL
-	if (!glunavailable) {
-		if (bpp == 8) {
-			glbuild_update_8bit_frame(&gl8bit, frame, bytesperline, yres);
-			glbuild_draw_8bit_frame(&gl8bit);
-		}
-
-		SDL_GL_SwapWindow(sdl_window);
-		return;
-	}
-#endif
 
 	unsigned char *pixels, *in;
 	int pitch, y, x;
@@ -1161,11 +1005,6 @@ void showframe(void)
 int setpalette(int start, int num, unsigned char *dapal)
 {
 	(void)start; (void)num; (void)dapal;
-#if USE_OPENGL
-	if (!glunavailable) {
-		glbuild_update_8bit_palette(&gl8bit, curpalettefaded);
-	}
-#endif
 	return 0;
 }
 
@@ -1176,9 +1015,6 @@ int setpalette(int start, int num, unsigned char *dapal)
 int setsysgamma(float shadergamma, float sysgamma)
 {
 	int r = 0;
-#if USE_OPENGL
-	if (!glunavailable && bpp == 8) glbuild_set_8bit_gamma(&gl8bit, shadergamma);
-#endif
 	if (sdl_window) {
 		if (sysgamma < 0.f) r = SDL_SetWindowBrightness(sdl_window, 1.0);
 		else r = SDL_SetWindowBrightness(sdl_window, sysgamma);
@@ -1188,37 +1024,6 @@ int setsysgamma(float shadergamma, float sysgamma)
 }
 
 
-#if USE_OPENGL
-//
-// loadgldriver -- loads an OpenGL DLL
-//
-int loadgldriver(const char *soname)
-{
-	const char *name = soname;
-	if (!name) {
-		name = "system OpenGL library";
-	}
-
-	buildprintf("Loading %s\n", name);
-	if (SDL_GL_LoadLibrary(soname)) return -1;
-	return 0;
-}
-
-int unloadgldriver(void)
-{
-	SDL_GL_UnloadLibrary();
-	return 0;
-}
-
-//
-// getglprocaddress
-//
-void *getglprocaddress(const char *name, int ext)
-{
-	(void)ext;
-	return (void*)SDL_GL_GetProcAddress(name);
-}
-#endif
 
 
 static void loadappicon(void)
@@ -1554,29 +1359,3 @@ static int buildkeytranslationtable(void)
 	return 0;
 }
 
-#if USE_OPENGL
-static int set_glswapinterval(const osdfuncparm_t *parm)
-{
-	int interval;
-
-	if (glunavailable) {
-		buildputs("glswapinterval is not adjustable\n");
-		return OSDCMD_OK;
-	}
-	if (parm->numparms == 0) {
-		buildprintf("glswapinterval is %d\n", glswapinterval);
-		return OSDCMD_OK;
-	}
-	if (parm->numparms != 1) return OSDCMD_SHOWHELP;
-
-	interval = atoi(parm->parms[0]);
-	if (interval < -1 || interval > 8) return OSDCMD_SHOWHELP;
-
-	if (SDL_GL_SetSwapInterval(interval) < 0) {
-		buildprintf("error: could not change swap interval: %s\n", SDL_GetError());
-	} else {
-		glswapinterval = SDL_GL_GetSwapInterval();
-	}
-	return OSDCMD_OK;
-}
-#endif
