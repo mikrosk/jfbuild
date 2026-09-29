@@ -11,6 +11,9 @@
 #if (SDL_MAJOR_VERSION != 1) || (SDL_MINOR_VERSION != 2)
 #  error This must be built with SDL1.2
 #endif
+#if USE_OPENGL
+#  error OpenGL is not supported with SDL1.2
+#endif
 
 #include <stdlib.h>
 #include <math.h>
@@ -22,7 +25,6 @@
 #include "a.h"
 #include "osd.h"
 
-static int backgroundidle = 0;
 static char apptitle[256] = "Build Engine";
 static char wintitle[256] = "";
 
@@ -135,7 +137,7 @@ void wm_setwindowtitle(const char *name)
 
 void wm_allowbackgroundidle(int onf)
 {
-	backgroundidle = onf;
+	(void)onf;
 }
 
 void wm_allowtaskswitching(int onf)
@@ -161,10 +163,11 @@ int main(int argc, char *argv[])
 
 	buildkeytranslationtable();
 
-	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_NOPARACHUTE)) {
+	if (SDL_Init(SDL_INIT_VIDEO)) {
 		buildprintf("Early initialisation of SDL failed! (%s)\n", SDL_GetError());
 		return 1;
 	}
+	atexit(SDL_Quit);
 
 	_buildargc = argc;
 	_buildargv = (const char **)argv;
@@ -180,8 +183,6 @@ int main(int argc, char *argv[])
 
 	startwin_close();
 
-	SDL_Quit();
-
 	return r;
 }
 
@@ -193,6 +194,7 @@ int initsystem(void)
 {
 	const SDL_version *linked = SDL_Linked_Version();
 	SDL_version compiled;
+	char drvname[64];
 
 	SDL_VERSION(&compiled);
 
@@ -200,6 +202,9 @@ int initsystem(void)
 		  "(compiled with SDL version %d.%d.%d, runtime version %d.%d.%d)\n",
 		compiled.major, compiled.minor, compiled.patch,
 		linked->major, linked->minor, linked->patch);
+
+	if (SDL_VideoDriverName(drvname, sizeof(drvname)))
+		buildprintf("Using \"%s\" video driver\n", drvname);
 
 	enumdisplays();
 
@@ -293,7 +298,7 @@ int initinput(void)
 				buildprintf("Using joystick %s\n", SDL_JoystickName(SDL_JoystickIndex(joystick)));
 
 				inputdevices |= 4;
-				joynumaxes    = min(Barraylen(joyaxis), SDL_JoystickNumAxes(joystick));
+				joynumaxes    = min((int)Barraylen(joyaxis), SDL_JoystickNumAxes(joystick));
 				joynumbuttons = min(32, SDL_JoystickNumButtons(joystick));
 				SDL_JoystickEventState(SDL_ENABLE);
 			} else {
@@ -331,11 +336,11 @@ const char *getjoyname(int what, int num)
 	switch (what) {
 		case 0: // axis
 			if ((unsigned)num >= (unsigned)joynumaxes) return NULL;
-			Bsprintf(tmp, "Axis %d", num);
+			Bsprintf(tmp, "Axis %d", num+1);
 			return tmp;
 		case 1: // button
 			if ((unsigned)num >= (unsigned)joynumbuttons) return NULL;
-			Bsprintf(tmp, "Button %d", num);
+			Bsprintf(tmp, "Button %d", num+1);
 			return tmp;
 		default:
 			return NULL;
@@ -524,7 +529,6 @@ int gettimerfreq(void)
 static void enumdisplays(void)
 {
 	const SDL_VideoInfo *vinfo;
-	char drvname[64];
 
 	// The desktop size is known before the first mode set.
 	vinfo = SDL_GetVideoInfo();
@@ -532,16 +536,11 @@ static void enumdisplays(void)
 		desktopw = vinfo->current_w;
 		desktoph = vinfo->current_h;
 	} else {
-		desktopw = 640;
-		desktoph = 480;
+		desktopw = 320;
+		desktoph = 240;
 	}
 
-	if (SDL_VideoDriverName(drvname, sizeof(drvname))) {
-		Bsnprintf(displayname, sizeof(displayname), "%s display", drvname);
-	} else {
-		Bstrcpy(displayname, "Primary display");
-	}
-	displayname[sizeof(displayname)-1] = 0;
+	Bstrcpy(displayname, "Primary display");
 
 	debugprintf("Displays available:\n");
 	debugprintf("  %d) %s (%dx%d)\n", 0, displayname, desktopw, desktoph);
@@ -976,6 +975,24 @@ static int buildkeytranslationtable(void)
 	MAP(SDLK_9,     0xa);
 	MAP(SDLK_SEMICOLON, 0x27);
 	MAP(SDLK_EQUALS,    0xd);
+	// Unshifted symbols of non-US layouts, mapped to the US key producing them when shifted.
+	MAP(SDLK_EXCLAIM,   0x2);   // '1'
+	MAP(SDLK_QUOTEDBL,  0x28);  // '''
+	MAP(SDLK_HASH,      0x4);   // '3'
+	MAP(SDLK_DOLLAR,    0x5);   // '4'
+	MAP(37,             0x6);   // '5', SDL1.2 has no keysym for '%'
+	MAP(SDLK_AMPERSAND, 0x8);   // '7'
+	MAP(SDLK_ASTERISK,  0x9);   // '8'
+	MAP(SDLK_LEFTPAREN, 0xa);   // '9'
+	MAP(SDLK_RIGHTPAREN, 0xb);  // '0'
+	MAP(SDLK_PLUS,      0xd);   // '='
+	MAP(SDLK_COLON,     0x27);  // ';'
+	MAP(SDLK_LESS,      0x33);  // ','
+	MAP(SDLK_GREATER,   0x34);  // '.'
+	MAP(SDLK_QUESTION,  0x35);  // '/'
+	MAP(SDLK_AT,        0x3);   // '2'
+	MAP(SDLK_CARET,     0x7);   // '6'
+	MAP(SDLK_UNDERSCORE, 0xc);  // '-'
 	MAPC(SDLK_LEFTBRACKET,   0x1a, 0x1b | WITH_CONTROL_KEY);
 	MAPC(SDLK_BACKSLASH, 0x2b, 0x1c | WITH_CONTROL_KEY);
 	MAPC(SDLK_RIGHTBRACKET,  0x1b, 0x1d | WITH_CONTROL_KEY);
@@ -1057,6 +1074,7 @@ static int buildkeytranslationtable(void)
 	MAP(SDLK_RSUPER,    0xdc);  // win r
 	MAP(SDLK_PRINT,     -2);    // 0xaa + 0xb7
 	MAP(SDLK_SYSREQ,    0x54);  // alt+printscr
+	MAP(SDLK_BREAK,     0xb7);  // ctrl+pause
 	MAP(SDLK_MENU,      0xdd);  // win menu?
 
 	return 0;
