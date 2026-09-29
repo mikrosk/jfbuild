@@ -2,14 +2,14 @@
 // for the Build Engine
 // by Jonathon Fowler (jf@jonof.id.au)
 //
-// Use SDL2 from http://www.libsdl.org
+// Use SDL1.2 from http://www.libsdl.org
 
 #include "build.h"
 
 #include "SDL.h"
 
-#if (SDL_MAJOR_VERSION != 2)
-#  error This must be built with SDL2
+#if (SDL_MAJOR_VERSION != 1) || (SDL_MINOR_VERSION != 2)
+#  error This must be built with SDL1.2
 #endif
 
 #include <stdlib.h>
@@ -22,42 +22,31 @@
 #include "a.h"
 #include "osd.h"
 
-
 static int backgroundidle = 0;
 static char apptitle[256] = "Build Engine";
 static char wintitle[256] = "";
 
 // video
-static SDL_Window *sdl_window;
-static SDL_Renderer *sdl_renderer;	// For non-GL 8-bit mode output.
-static SDL_Texture *sdl_texture;	// For non-GL 8-bit mode output.
-static SDL_Surface *sdl_surface;	// For non-GL 8-bit mode output.
+static SDL_Surface *sdl_surface;	// The video surface.
 static SDL_Surface *sdl_appicon;
-static int usesdlrenderer = 0;
 static unsigned char *frame;
 static float curshadergamma = 1.f, cursysgamma = -1.f;
-
-static struct displayinfo {
-	SDL_DisplayMode mode;
-	SDL_Rect bounds;
-	SDL_Rect usablebounds;
-	int index;
-	char name[128];
-} *displays;
-int displaycnt;
-
+static int desktopw, desktoph;
+static char displayname[128];
+int displaycnt = 1;	// SDL1.2 knows only one display.
 
 // input
 static char keynames[256][24];
+static char keydown[256];	// Physical key state, for detecting auto-repeat.
 static char mouseacquired=0,moustat=0;
-static SDL_GameController *controller = NULL;
+static SDL_Joystick *joystick = NULL;
 
 struct keytranslate {
 	unsigned char normal;
 	unsigned char controlchar;  // an ASCII control character to insert into the character fifo
 };
 #define WITH_CONTROL_KEY 0x80
-static struct keytranslate keytranslation[SDL_NUM_SCANCODES];
+static struct keytranslate keytranslation[SDLK_LAST];
 static int buildkeytranslationtable(void);
 
 static void enumdisplays(void);
@@ -81,20 +70,11 @@ int wm_msgbox(const char *name, const char *fmt, ...)
 
 	if (rv < 0) return -1;
 
-	do {
-		rv = 0;
-
-		if (SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, name, buf, sdl_window) >= 0) {
-			rv = 1;
-			break;
-		}
-
-		puts(buf);
-	} while(0);
+	puts(buf);
 
 	free(buf);
 
-	return rv;
+	return 1;
 }
 
 int wm_ynbox(const char *name, const char *fmt, ...)
@@ -113,36 +93,12 @@ int wm_ynbox(const char *name, const char *fmt, ...)
 
 	if (rv < 0) return -1;
 
-	SDL_MessageBoxButtonData buttons[2] = {
-		{ SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Yes" },
-		{ SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "No" },
-	};
-	SDL_MessageBoxData msgbox = {
-		SDL_MESSAGEBOX_INFORMATION,
-		sdl_window,
-		name,
-		buf,
-		SDL_arraysize(buttons),
-		buttons,
-		NULL
-	};
-
-	do {
-		rv = 0;
-
-		if (SDL_ShowMessageBox(&msgbox, &rv) >= 0) {
-			rv = (rv == 1);
-			break;
-		}
-
-		puts(buf);
-		puts("   (assuming 'No')");
-		rv = 0;
-	} while(0);
+	puts(buf);
+	puts("   (assuming 'No')");
 
 	free(buf);
 
-	return rv;
+	return 0;
 }
 
 int wm_filechooser(const char *initialdir, const char *initialfile, const char *type, int foropen, char **choice)
@@ -172,8 +128,8 @@ void wm_setwindowtitle(const char *name)
 		wintitle[ sizeof(wintitle)-1 ] = 0;
 	}
 
-	if (sdl_window) {
-		SDL_SetWindowTitle(sdl_window, wintitle);
+	if (SDL_WasInit(SDL_INIT_VIDEO)) {
+		SDL_WM_SetCaption(wintitle, NULL);
 	}
 }
 
@@ -205,11 +161,10 @@ int main(int argc, char *argv[])
 
 	buildkeytranslationtable();
 
-	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER)) {
+	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_NOPARACHUTE)) {
 		buildprintf("Early initialisation of SDL failed! (%s)\n", SDL_GetError());
 		return 1;
 	}
-
 
 	_buildargc = argc;
 	_buildargv = (const char **)argv;
@@ -222,7 +177,6 @@ int main(int argc, char *argv[])
 	r = app_main(_buildargc, (char const * const*)_buildargv);
 
 	if (sdl_appicon) SDL_FreeSurface(sdl_appicon);
-
 
 	startwin_close();
 
@@ -237,25 +191,19 @@ int main(int argc, char *argv[])
 //
 int initsystem(void)
 {
-	SDL_version linked;
+	const SDL_version *linked = SDL_Linked_Version();
 	SDL_version compiled;
 
-	SDL_GetVersion(&linked);
 	SDL_VERSION(&compiled);
 
-	buildprintf("SDL2 system interface "
+	buildprintf("SDL1.2 system interface "
 		  "(compiled with SDL version %d.%d.%d, runtime version %d.%d.%d)\n",
-		linked.major, linked.minor, linked.patch,
-		compiled.major, compiled.minor, compiled.patch);
+		compiled.major, compiled.minor, compiled.patch,
+		linked->major, linked->minor, linked->patch);
 
 	enumdisplays();
 
 	atexit(uninitsystem);
-
-	if (getenv("BUILD_USESDLRENDERER")) {
-		buildputs("Will use SDL renderer if OpenGL is not available.\n");
-		usesdlrenderer = 1;
-	}
 
 	return 0;
 }
@@ -271,12 +219,6 @@ void uninitsystem(void)
 	uninittimer();
 
 	shutdownvideo();
-
-	if (displays) {
-		free(displays);
-		displays = NULL;
-		displaycnt = 0;
-	}
 }
 
 
@@ -328,60 +270,34 @@ int initinput(void)
 	mouseacquired = 0;
 
 	memset(keynames,0,sizeof(keynames));
-	for (i=0; i<SDL_NUM_SCANCODES; i++) {
+	memset(keydown,0,sizeof(keydown));
+	for (i=0; i<SDLK_LAST; i++) {
 		if (!keytranslation[i].normal) continue;
-		strncpy(keynames[ keytranslation[i].normal ], SDL_GetScancodeName(i), sizeof(keynames[i])-1);
+		strncpy(keynames[ keytranslation[i].normal ], SDL_GetKeyName((SDLKey)i), sizeof(keynames[0])-1);
 	}
 
-	if (SDL_WasInit(SDL_INIT_GAMECONTROLLER)) {
-		int flen, fh;
-		char *dbuf = NULL;
-		SDL_RWops *rwops = NULL;
-
-		// Load an available controller mappings file.
-		fh = kopen4load("gamecontrollerdb.txt", 0);
-		if (fh >= 0) {
-			flen = kfilelength(fh);
-			if (flen >= 0) {
-				dbuf = (char *)malloc(flen + 1);
-			}
-		}
-		if (dbuf) {
-			flen = kread(fh, dbuf, flen);
-			kclose(fh);
-			if (flen >= 0) {
-				rwops = SDL_RWFromConstMem(dbuf, flen);
-			}
-		}
-		if (rwops) {
-			i = SDL_GameControllerAddMappingsFromRW(rwops, 0);
-			buildprintf("Added %d game controller mappings\n", i);
-			free(dbuf);
-			SDL_free(rwops);
-		}
-
-		// Enumerate game controllers.
+	if (SDL_InitSubSystem(SDL_INIT_JOYSTICK) == 0) {
+		// Enumerate joysticks.
 		if (SDL_NumJoysticks() < 1) {
-			buildputs("No game controllers found\n");
+			buildputs("No joysticks found\n");
 		} else {
 			int numjoysticks = SDL_NumJoysticks();
-			buildputs("Game controllers:\n");
+			buildputs("Joysticks:\n");
 			for (i = 0; i < numjoysticks; i++) {
-				if (SDL_IsGameController(i)) {
-					buildprintf("  - %s\n", SDL_GameControllerNameForIndex(i));
-					if (!controller) {
-						controller = SDL_GameControllerOpen(i);
-					}
+				buildprintf("  - %s\n", SDL_JoystickName(i));
+				if (!joystick) {
+					joystick = SDL_JoystickOpen(i);
 				}
 			}
-			if (controller) {
-				buildprintf("Using controller %s\n", SDL_GameControllerName(controller));
+			if (joystick) {
+				buildprintf("Using joystick %s\n", SDL_JoystickName(SDL_JoystickIndex(joystick)));
 
 				inputdevices |= 4;
-				joynumaxes    = min(Barraylen(joyaxis), SDL_CONTROLLER_AXIS_MAX);
-				joynumbuttons = SDL_CONTROLLER_BUTTON_MAX;
+				joynumaxes    = min(Barraylen(joyaxis), SDL_JoystickNumAxes(joystick));
+				joynumbuttons = min(32, SDL_JoystickNumButtons(joystick));
+				SDL_JoystickEventState(SDL_ENABLE);
 			} else {
-				buildprintf("No controllers are usable\n");
+				buildprintf("No joysticks are usable\n");
 			}
 		}
 	}
@@ -396,9 +312,9 @@ void uninitinput(void)
 {
 	uninitmouse();
 
-	if (controller) {
-		SDL_GameControllerClose(controller);
-		controller = NULL;
+	if (joystick) {
+		SDL_JoystickClose(joystick);
+		joystick = NULL;
 	}
 }
 
@@ -410,11 +326,17 @@ const char *getkeyname(int num)
 
 const char *getjoyname(int what, int num)
 {
+	static char tmp[64];
+
 	switch (what) {
 		case 0: // axis
-			return SDL_GameControllerGetStringForAxis(num);
+			if ((unsigned)num >= (unsigned)joynumaxes) return NULL;
+			Bsprintf(tmp, "Axis %d", num);
+			return tmp;
 		case 1: // button
-			return SDL_GameControllerGetStringForButton(num);
+			if ((unsigned)num >= (unsigned)joynumbuttons) return NULL;
+			Bsprintf(tmp, "Button %d", num);
+			return tmp;
 		default:
 			return NULL;
 	}
@@ -442,13 +364,23 @@ void uninitmouse(void)
 
 
 //
+// setrelativemouse() -- SDL1.2 reports relative motion while input is grabbed and the cursor hidden
+//
+static void setrelativemouse(int a)
+{
+	if (!SDL_GetVideoSurface()) return;
+	SDL_WM_GrabInput(a ? SDL_GRAB_ON : SDL_GRAB_OFF);
+	SDL_ShowCursor(a ? SDL_DISABLE : SDL_ENABLE);
+}
+
+//
 // grabmouse() -- show/hide mouse cursor
 //
 void grabmouse(int a)
 {
 	if (appactive && moustat) {
 		if (a != mouseacquired) {
-			SDL_SetRelativeMouseMode(a ? SDL_TRUE : SDL_FALSE);
+			setrelativemouse(a);
 			mouseacquired = a;
 		}
 	} else {
@@ -501,7 +433,7 @@ void releaseallbuttons(void)
 //
 //
 
-static Uint64 timerfreq=0;
+static Uint32 timerfreq=0;
 static Uint32 timerlastsample=0;
 static Uint32 timerticspersec=0;
 static void (*usertimercallback)(void) = NULL;
@@ -515,9 +447,9 @@ int inittimer(int tickspersecond, void(*callback)(void))
 
 	buildputs("Initialising timer\n");
 
-	timerfreq = SDL_GetPerformanceFrequency();
+	timerfreq = 1000;	// SDL_GetTicks() counts milliseconds
 	timerticspersec = tickspersecond;
-	timerlastsample = (Uint32)(SDL_GetPerformanceCounter() * timerticspersec / timerfreq);
+	timerlastsample = (Uint32)((Uint64)SDL_GetTicks() * timerticspersec / timerfreq);
 
 	usertimercallback = callback;
 
@@ -543,7 +475,7 @@ void sampletimer(void)
 
 	if (!timerfreq) return;
 
-	n = (int)(SDL_GetPerformanceCounter() * timerticspersec / timerfreq) - timerlastsample;
+	n = (int)((Uint64)SDL_GetTicks() * timerticspersec / timerfreq) - timerlastsample;
 	if (n>0) {
 		totalclock += n;
 		timerlastsample += n;
@@ -591,40 +523,28 @@ int gettimerfreq(void)
 
 static void enumdisplays(void)
 {
-	int i, n;
+	const SDL_VideoInfo *vinfo;
+	char drvname[64];
 
-	displaycnt = SDL_GetNumVideoDisplays();
-	if (displaycnt < 1) {
-		buildputs("No video displays available!\n");
-		return;
+	// The desktop size is known before the first mode set.
+	vinfo = SDL_GetVideoInfo();
+	if (vinfo && vinfo->current_w > 0 && vinfo->current_h > 0) {
+		desktopw = vinfo->current_w;
+		desktoph = vinfo->current_h;
+	} else {
+		desktopw = 640;
+		desktoph = 480;
 	}
-	displays = (struct displayinfo *)calloc(displaycnt, sizeof(struct displayinfo));
-	if (!displays) {
-		buildputs("Could not allocate display information structures!\n");
-		displaycnt = 0;
-		return;
+
+	if (SDL_VideoDriverName(drvname, sizeof(drvname))) {
+		Bsnprintf(displayname, sizeof(displayname), "%s display", drvname);
+	} else {
+		Bstrcpy(displayname, "Primary display");
 	}
+	displayname[sizeof(displayname)-1] = 0;
 
 	debugprintf("Displays available:\n");
-	for (i=n=0; i<displaycnt; i++) {
-		displays[n].index = i;
-		strncpy(displays[n].name, SDL_GetDisplayName(i), sizeof(displays[0].name)-1);
-		if (SDL_GetDesktopDisplayMode(i, &displays[n].mode) < 0) {
-			debugprintf("getvalidmodes(): error getting mode of display %d (%s)\n", i, SDL_GetError());
-			continue;
-		}
-		if (SDL_GetDisplayBounds(i, &displays[n].bounds) < 0) {
-			debugprintf("getvalidmodes(): error getting bounds of display %d (%s)\n", i, SDL_GetError());
-			continue;
-		}
-		if (SDL_GetDisplayUsableBounds(i, &displays[n].usablebounds) < 0) {
-			debugprintf("getvalidmodes(): error getting usable bounds of display %d (%s)\n", i, SDL_GetError());
-			continue;
-		}
-		debugprintf("  %d) %s (%dx%d)\n", n, displays[n].name, displays[n].mode.w, displays[n].mode.h);
-		n++;
-	}
-	displaycnt = n;
+	debugprintf("  %d) %s (%dx%d)\n", 0, displayname, desktopw, desktoph);
 }
 
 //
@@ -632,23 +552,27 @@ static void enumdisplays(void)
 //
 void getvalidmodes(void)
 {
-	int i, maxx, maxy;
+	SDL_PixelFormat pf;
+	SDL_Rect **modes;
+	int i;
 
 	if (validmodecnt) return;
 
 	// Fullscreen modes
-	for (i=0; i<displaycnt; i++) {
-		// 8-bit modes upsample to the desktop.
-		addstandardvalidmodes(displays[i].mode.w, displays[i].mode.h, 8, 1, i, 0, -1);
+	memset(&pf, 0, sizeof(pf));
+	pf.BitsPerPixel = 8;
+	pf.BytesPerPixel = 1;
+	modes = SDL_ListModes(&pf, SDL_FULLSCREEN | SDL_HWPALETTE);
+	if (modes == (SDL_Rect **)-1) {
+		addstandardvalidmodes(desktopw, desktoph, 8, 1, 0, 0, -1);
+	} else if (modes) {
+		for (i=0; modes[i]; i++) {
+			addvalidmode(modes[i]->w, modes[i]->h, 8, 1, 0, 0, -1);
+		}
 	}
 
 	// Windowed modes
-	maxx = maxy = INT_MIN;
-	for (i=0; i<displaycnt; i++) {
-		maxx = max(maxx, displays[i].usablebounds.w);
-		maxy = max(maxy, displays[i].usablebounds.h);
-	}
-	addstandardvalidmodes(maxx, maxy, 8, 0, 0, 0, -1);
+	addstandardvalidmodes(desktopw, desktoph, 8, 0, 0, 0, -1);
 
 	sortvalidmodes();
 }
@@ -660,23 +584,8 @@ static void shutdownvideo(void)
 		frame = NULL;
 	}
 
-
-	if (sdl_texture) {
-		SDL_DestroyTexture(sdl_texture);
-		sdl_texture = NULL;
-	}
-	if (sdl_renderer) {
-		SDL_DestroyRenderer(sdl_renderer);
-		sdl_renderer = NULL;
-	}
-	if (sdl_surface) {
-		SDL_FreeSurface(sdl_surface);
-		sdl_surface = NULL;
-	}
-	if (sdl_window) {
-		SDL_DestroyWindow(sdl_window);
-		sdl_window = NULL;
-	}
+	// The video surface is owned by SDL and freed on the next mode set or at SDL_Quit().
+	sdl_surface = NULL;
 }
 
 //
@@ -686,8 +595,6 @@ int setvideomode(int xdim, int ydim, int bitspp, int fullsc)
 {
 	int regrab = 0;
 	int flags, display, modenum;
-	int winx, winy, winw, winh;
-	unsigned refresh=0;
 	const char *str;
 
 	if ((fullsc == fullscreen) && (xdim == xres) && (ydim == yres) && (bitspp == bpp) && !videomodereset) {
@@ -695,12 +602,13 @@ int setvideomode(int xdim, int ydim, int bitspp, int fullsc)
 		return 0;
 	}
 
+	if (bitspp != 8) return -1;
+
 	display = fullsc>>8;
 	if (display >= displaycnt) display = 0, fullsc &= 255; // Display number out of range, use primary instead.
-	modenum = checkvideomode(&xdim,&ydim,bitspp,fullsc,0);	// Will return if GL mode not available.
+	modenum = checkvideomode(&xdim,&ydim,bitspp,fullsc,0);
 	if (modenum < 0) return -1;
-	else if (modenum != VIDEOMODE_RELAXED) refresh = validmode[modenum].refresh;
-	else if (fullsc&255) return -1; // Must be a perfect match for fullscreen.
+	else if (modenum == VIDEOMODE_RELAXED && (fullsc&255)) return -1; // Must be a perfect match for fullscreen.
 
 	if (mouseacquired) {
 		regrab = 1;
@@ -710,79 +618,29 @@ int setvideomode(int xdim, int ydim, int bitspp, int fullsc)
 	if (baselayer_videomodewillchange) baselayer_videomodewillchange();
 	shutdownvideo();
 
-	if ((fullsc&255) && refresh) str = "Setting video mode %dx%d (%d-bit fullscreen, display %d, %u Hz)\n";
-	else if (fullsc&255) str = "Setting video mode %dx%d (%d-bit fullscreen, display %d)\n";
+	if (fullsc&255) str = "Setting video mode %dx%d (%d-bit fullscreen, display %d)\n";
 	else str = "Setting video mode %dx%d (%d-bit windowed)\n";
-	buildprintf(str,xdim,ydim,bitspp,display,refresh);
+	buildprintf(str,xdim,ydim,bitspp,display);
 
-	do {
-		flags = SDL_WINDOW_HIDDEN;
+	// The icon and title must be set before the video mode.
+	if (sdl_appicon) SDL_WM_SetIcon(sdl_appicon, NULL);
+	SDL_WM_SetCaption(wintitle, NULL);
 
+	flags = SDL_SWSURFACE | SDL_HWPALETTE;
+	if (fullsc&255) flags |= SDL_FULLSCREEN;
 
-		// Centre on whichever display is given.
-		winx = displays[display].bounds.x + (displays[display].bounds.w - xdim) / 2;
-		winy = displays[display].bounds.y + (displays[display].bounds.h - ydim) / 2;
-		winw = xdim; winh = ydim;
-		if (fullsc&255) {
-			if (bitspp > 8) flags |= SDL_WINDOW_FULLSCREEN;
-			else flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
-		}
+	// SDL emulates an 8-bit surface if the display cannot provide one.
+	sdl_surface = SDL_SetVideoMode(xdim, ydim, 8, flags);
+	if (!sdl_surface) {
+		buildprintf("Error setting video mode: %s\n", SDL_GetError());
+		return -1;
+	}
 
-		sdl_window = SDL_CreateWindow(wintitle, winx, winy, winw, winh, flags);
-		if (!sdl_window) {
-			buildprintf("Error creating window: %s\n", SDL_GetError());
-
-
-			return -1;
-		} else if ((fullsc&255) && bitspp>8) {
-			SDL_DisplayMode mode;
-			if (SDL_GetDisplayMode(displays[display].index, validmode[modenum].extra, &mode) == 0) {
-				if (SDL_SetWindowDisplayMode(sdl_window, &mode) < 0) {
-					buildprintf("Error setting window display mode: %s\n", SDL_GetError());
-				}
-			}
-		}
-		break;
-	} while (1);
-
-	if (sdl_appicon) SDL_SetWindowIcon(sdl_window, sdl_appicon);
-
-	if (bitspp == 8) {
+	{
 		int i, j, pitch;
 
 		// Round up to a multiple of 4.
 		pitch = (((xdim|1) + 4) & ~3);
-
-		if (usesdlrenderer) {
-			// 8-bit software with no GL shader blitting goes via the SDL rendering apparatus.
-			SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
-
-			sdl_renderer = SDL_CreateRenderer(sdl_window, -1, SDL_RENDERER_PRESENTVSYNC);
-			if (!sdl_renderer) {
-				buildprintf("Error creating renderer: %s\n", SDL_GetError());
-				return -1;
-			}
-			SDL_SetRenderDrawColor(sdl_renderer, 0, 0, 0, 255);
-
-			sdl_texture = SDL_CreateTexture(sdl_renderer,
-				B_LITTLE_ENDIAN ? SDL_PIXELFORMAT_ABGR8888 : SDL_PIXELFORMAT_RGBA8888,
-				SDL_TEXTUREACCESS_STREAMING, xdim, ydim);
-			if (!sdl_texture) {
-				buildprintf("Error creating texture: %s\n", SDL_GetError());
-				return -1;
-			}
-		} else {
-			// 8-bit software with no GL shader blitting goes via the SDL rendering apparatus.
-			sdl_surface = SDL_CreateRGBSurface(0, xdim, ydim, 32,
-				255l<<(8*offsetof(palette_t, r)),
-				255l<<(8*offsetof(palette_t, g)),
-				255l<<(8*offsetof(palette_t, b)),
-				0);
-			if (!sdl_surface) {
-				buildprintf("Error creating surface: %s\n", SDL_GetError());
-				return -1;
-			}
-		}
 
 		frame = (unsigned char *) malloc(pitch * ydim);
 		if (!frame) {
@@ -800,19 +658,12 @@ int setvideomode(int xdim, int ydim, int bitspp, int fullsc)
 			ylookup[i] = j;
 			j += bytesperline;
 		}
-
-	} else {
-		return -1;
 	}
-
-	SDL_ShowWindow(sdl_window);
-	SDL_RaiseWindow(sdl_window);
 
 	xres = xdim;
 	yres = ydim;
 	bpp = bitspp;
 	fullscreen = fullsc;
-
 
 	videomodereset = 0;
 	if (baselayer_videomodedidchange) baselayer_videomodedidchange();
@@ -826,7 +677,8 @@ int setvideomode(int xdim, int ydim, int bitspp, int fullsc)
 	startwin_close();
 
 	// Start listening for character input.
-	SDL_EventState(SDL_TEXTINPUT, SDL_ENABLE);
+	SDL_EnableUNICODE(1);
+	SDL_EnableKeyRepeat(SDL_DEFAULT_REPEAT_DELAY, SDL_DEFAULT_REPEAT_INTERVAL);
 
 	return 0;
 }
@@ -837,8 +689,8 @@ int setvideomode(int xdim, int ydim, int bitspp, int fullsc)
 //
 const char *getdisplayname(int display)
 {
-	if (!displays || (unsigned)display >= (unsigned)displaycnt) return NULL;
-	return displays[display].name;
+	if ((unsigned)display >= (unsigned)displaycnt) return NULL;
+	return displayname;
 }
 
 
@@ -847,84 +699,27 @@ const char *getdisplayname(int display)
 //
 void showframe(void)
 {
-
 	unsigned char *pixels, *in;
-	int pitch, y, x;
-	int rendx, rendy, rendaspect, frameaspect;
-	SDL_Rect destrect;
-	SDL_Surface *winsurface = NULL;
+	int y;
 
-	if (usesdlrenderer) {
-		if (SDL_LockTexture(sdl_texture, NULL, (void**)&pixels, &pitch)) {
-			debugprintf("Could not lock texture: %s\n", SDL_GetError());
-			return;
-		}
-	} else {
-		if (SDL_LockSurface(sdl_surface)) {
-			debugprintf("Could not lock surface: %s\n", SDL_GetError());
-			return;
-		}
-		pixels = (unsigned char *)sdl_surface->pixels;
-		pitch = sdl_surface->pitch;
+	if (!sdl_surface) return;
+
+	if (SDL_MUSTLOCK(sdl_surface) && SDL_LockSurface(sdl_surface)) {
+		debugprintf("Could not lock surface: %s\n", SDL_GetError());
+		return;
 	}
 
+	pixels = (unsigned char *)sdl_surface->pixels;
 	in = frame;
 	for (y = yres - 1; y >= 0; y--) {
-		for (x = xres - 1; x >= 0; x--) {
-			memcpy(&pixels[x<<2], &curpalettefaded[in[x]], 4);
-		}
-		pixels += pitch;
+		memcpy(pixels, in, xres);
+		pixels += sdl_surface->pitch;
 		in += bytesperline;
 	}
 
-	if (usesdlrenderer) {
-		SDL_UnlockTexture(sdl_texture);
-	} else {
-		SDL_UnlockSurface(sdl_surface);
-	}
+	if (SDL_MUSTLOCK(sdl_surface)) SDL_UnlockSurface(sdl_surface);
 
-	if (usesdlrenderer) {
-		SDL_GetRendererOutputSize(sdl_renderer, &rendx, &rendy);
-	} else {
-		winsurface = SDL_GetWindowSurface(sdl_window);
-		if (!winsurface) {
-			debugprintf("Could not get window surface: %s\n", SDL_GetError());
-			return;
-		}
-		rendx = winsurface->w;
-		rendy = winsurface->h;
-	}
-
-	rendaspect = divscale16(rendx, rendy);
-	frameaspect = divscale16(xres, yres);
-	if (rendaspect >= frameaspect) {
-		// Renderer is at least as wide as the frame. We maximise frame height and centre on width.
-		destrect.y = 0;
-		destrect.h = rendy;
-		destrect.w = mulscale16(rendy, frameaspect);
-		destrect.x = (rendx - destrect.w) >> 1;
-	} else {
-		// Renderer is narrower than the frame. We maximise frame width and centre on height.
-		destrect.x = 0;
-		destrect.w = rendx;
-		destrect.h = divscale16(rendx, frameaspect);
-		destrect.y = (rendy - destrect.h) >> 1;
-	}
-
-	if (usesdlrenderer) {
-		SDL_RenderClear(sdl_renderer);
-		if (SDL_RenderCopy(sdl_renderer, sdl_texture, NULL, &destrect)) {
-			debugprintf("Could not copy render texture: %s\n", SDL_GetError());
-		}
-		SDL_RenderPresent(sdl_renderer);
-	} else {
-		SDL_FillRect(winsurface, NULL, SDL_MapRGB(winsurface->format, 0, 0, 0));
-		if (SDL_BlitScaled(sdl_surface, NULL, winsurface, &destrect) < 0) {
-			debugprintf("Could not blit surface: %s\n", SDL_GetError());
-			return;
-		}
-		SDL_UpdateWindowSurface(sdl_window);
-	}
+	SDL_Flip(sdl_surface);
 }
 
 
@@ -933,7 +728,21 @@ void showframe(void)
 //
 int setpalette(int start, int num, unsigned char *dapal)
 {
+	SDL_Color colors[256];
+	int i;
+
 	(void)start; (void)num; (void)dapal;
+
+	if (!sdl_surface) return 0;
+
+	for (i = 0; i < 256; i++) {
+		colors[i].r = curpalettefaded[i].r;
+		colors[i].g = curpalettefaded[i].g;
+		colors[i].b = curpalettefaded[i].b;
+		colors[i].unused = 0;
+	}
+	SDL_SetPalette(sdl_surface, SDL_LOGPAL | SDL_PHYSPAL, colors, 0, 256);
+
 	return 0;
 }
 
@@ -944,15 +753,13 @@ int setpalette(int start, int num, unsigned char *dapal)
 int setsysgamma(float shadergamma, float sysgamma)
 {
 	int r = 0;
-	if (sdl_window) {
-		if (sysgamma < 0.f) r = SDL_SetWindowBrightness(sdl_window, 1.0);
-		else r = SDL_SetWindowBrightness(sdl_window, sysgamma);
+	if (sdl_surface) {
+		if (sysgamma < 0.f) r = SDL_SetGamma(1.0, 1.0, 1.0);
+		else r = SDL_SetGamma(sysgamma, sysgamma, sysgamma);
 	}
 	if (r == 0) { curshadergamma = shadergamma; cursysgamma = sysgamma; }
 	return r;
 }
-
-
 
 
 static void loadappicon(void)
@@ -993,29 +800,9 @@ int handleevents(void)
 	int code, rv=0, j, control;
 	SDL_Event ev;
 	static int firstcall = 1;
-	int eattextinput = 0;
 
 	while (SDL_PollEvent(&ev)) {
 		switch (ev.type) {
-			case SDL_TEXTINPUT:
-				if (eattextinput) {
-					eattextinput = 0;
-					break;
-				}
-				for (j = 0; j < SDL_TEXTINPUTEVENT_TEXT_SIZE && ev.text.text[j]; j++) {
-					if (ev.text.text[j] & 0x80) {
-						continue;   // UTF8 character byte
-					}
-					code = ev.text.text[j];
-					if (OSD_HandleChar(code)) {
-						if (((keyasciififoend+1)&(KEYFIFOSIZ-1)) != keyasciififoplc) {
-							keyasciififo[keyasciififoend] = code;
-							keyasciififoend = ((keyasciififoend+1)&(KEYFIFOSIZ-1));
-						}
-					}
-				}
-				break;
-
 			case SDL_KEYUP:
 				// (un)grab mouse with ctrl-g
 				if (ev.key.keysym.sym == SDLK_g
@@ -1025,8 +812,8 @@ int handleevents(void)
 				}
 				// else, fallthrough
 			case SDL_KEYDOWN:
-				code = keytranslation[ev.key.keysym.scancode].normal;
-				control = keytranslation[ev.key.keysym.scancode].controlchar;
+				code = keytranslation[ev.key.keysym.sym].normal;
+				control = keytranslation[ev.key.keysym.sym].controlchar;
 
 				if (control && ev.key.type == SDL_KEYDOWN) {
 					int needcontrol = (control & WITH_CONTROL_KEY) == WITH_CONTROL_KEY;
@@ -1048,38 +835,49 @@ int handleevents(void)
 
 				// hook in the osd
 				if (code == OSD_CaptureKey(-1)) {
+					// The character produced by the OSD toggle key is ignored.
 					if (ev.key.type == SDL_KEYDOWN) {
-						// The character produced by the OSD toggle key needs to be ignored.
-						eattextinput = 1;
-
 						OSD_ShowDisplay(-1);
 					}
 					break;
-				} else if (OSD_HandleKey(code, (ev.key.type == SDL_KEYDOWN)) == 0)
+				}
+
+				// Printable characters; control characters were handled above.
+				if (ev.key.type == SDL_KEYDOWN) {
+					int ch = ev.key.keysym.unicode;
+					if (ch >= 0x20 && ch < 0x7f && OSD_HandleChar(ch)) {
+						if (((keyasciififoend+1)&(KEYFIFOSIZ-1)) != keyasciififoplc) {
+							keyasciififo[keyasciififoend] = ch;
+							keyasciififoend = ((keyasciififoend+1)&(KEYFIFOSIZ-1));
+						}
+					}
+				}
+
+				if (OSD_HandleKey(code, (ev.key.type == SDL_KEYDOWN)) == 0)
 					break;
 
 				if (ev.key.type == SDL_KEYDOWN) {
-					if (!keystatus[code] && !ev.key.repeat) keystatus[code] = 1;
+					// SDL1.2 does not flag auto-repeated key presses.
+					if (!keystatus[code] && !keydown[code]) keystatus[code] = 1;
+					keydown[code] = 1;
 					keyfifo[keyfifoend] = code;
 					keyfifo[(keyfifoend+1)&(KEYFIFOSIZ-1)] = 1;
 					keyfifoend = ((keyfifoend+2)&(KEYFIFOSIZ-1));
 				} else {
 					keystatus[code] = 0;
+					keydown[code] = 0;
 					keyfifo[keyfifoend] = code;
 					keyfifo[(keyfifoend+1)&(KEYFIFOSIZ-1)] = 0;
 					keyfifoend = ((keyfifoend+2)&(KEYFIFOSIZ-1));
 				}
 				break;
 
-			case SDL_WINDOWEVENT:
-				if (ev.window.event == SDL_WINDOWEVENT_FOCUS_GAINED ||
-						ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
-					appactive = ev.window.event == SDL_WINDOWEVENT_FOCUS_GAINED;
+			case SDL_ACTIVEEVENT:
+				if (ev.active.state & SDL_APPINPUTFOCUS) {
+					appactive = ev.active.gain;
 					if (mouseacquired && moustat) {
-						SDL_SetRelativeMouseMode(appactive ? SDL_TRUE : SDL_FALSE);
+						setrelativemouse(appactive);
 					}
-					if (backgroundidle) SDL_SetThreadPriority(appactive ?
-						SDL_THREAD_PRIORITY_NORMAL : SDL_THREAD_PRIORITY_LOW);
 					rv=-1;
 				}
 				break;
@@ -1090,26 +888,16 @@ int handleevents(void)
 					case SDL_BUTTON_LEFT: j = 0; break;
 					case SDL_BUTTON_RIGHT: j = 1; break;
 					case SDL_BUTTON_MIDDLE: j = 2; break;
+					case SDL_BUTTON_WHEELDOWN: j = 4; break;
+					case SDL_BUTTON_WHEELUP: j = 5; break;
 					default: j = -1; break;
 				}
 				if (j<0) break;
 
 				if (ev.button.state == SDL_PRESSED)
 					mouseb |= (1<<j);
-				else
+				else if (j < 4) // mousewheel 'release' is done in readmousebstatus()
 					mouseb &= ~(1<<j);
-				break;
-
-			case SDL_MOUSEWHEEL:
-				if (ev.wheel.y > 0) {   // Up
-					j = 5;
-				} else if (ev.wheel.y < 0) {    // Down
-					j = 4;
-				} else {
-					break;
-				}
-				mouseb |= 1<<j;
-				// 'release' is done in readmousebstatus()
 				break;
 
 			case SDL_MOUSEMOTION:
@@ -1121,19 +909,19 @@ int handleevents(void)
 				}
 				break;
 
-			case SDL_CONTROLLERAXISMOTION:
-				if (appactive) {
-					joyaxis[ ev.caxis.axis ] = ev.caxis.value;
+			case SDL_JOYAXISMOTION:
+				if (appactive && ev.jaxis.axis < joynumaxes) {
+					joyaxis[ ev.jaxis.axis ] = ev.jaxis.value;
 				}
 				break;
 
-			case SDL_CONTROLLERBUTTONDOWN:
-			case SDL_CONTROLLERBUTTONUP:
-				if (appactive) {
-					if (ev.cbutton.state == SDL_PRESSED)
-						joyb |= 1 << ev.cbutton.button;
+			case SDL_JOYBUTTONDOWN:
+			case SDL_JOYBUTTONUP:
+				if (appactive && ev.jbutton.button < joynumbuttons) {
+					if (ev.jbutton.state == SDL_PRESSED)
+						joyb |= 1 << ev.jbutton.button;
 					else
-						joyb &= ~(1 << ev.cbutton.button);
+						joyb &= ~(1 << ev.jbutton.button);
 				}
 				break;
 
@@ -1165,112 +953,111 @@ static int buildkeytranslationtable(void)
 #define MAP(x,y) keytranslation[x].normal = y
 #define MAPC(x,y,c) keytranslation[x].normal = y, keytranslation[x].controlchar = c
 
-	MAPC(SDL_SCANCODE_BACKSPACE, 0xe, 0x8);
-	MAPC(SDL_SCANCODE_TAB,       0xf, 0x9);
-	MAPC(SDL_SCANCODE_RETURN,    0x1c, 0xd);
-	MAP(SDL_SCANCODE_PAUSE,     0x59);  // 0x1d + 0x45 + 0x9d + 0xc5
-	MAPC(SDL_SCANCODE_ESCAPE,    0x1, 0x1b);
-	MAP(SDL_SCANCODE_SPACE,     0x39);
-	MAP(SDL_SCANCODE_APOSTROPHE,     0x28);
-	MAP(SDL_SCANCODE_COMMA,     0x33);
-	MAP(SDL_SCANCODE_MINUS,     0xc);
-	MAP(SDL_SCANCODE_PERIOD,    0x34);
-	MAP(SDL_SCANCODE_SLASH,     0x35);
-	MAP(SDL_SCANCODE_0,     0xb);
-	MAP(SDL_SCANCODE_1,     0x2);
-	MAP(SDL_SCANCODE_2,     0x3);
-	MAP(SDL_SCANCODE_3,     0x4);
-	MAP(SDL_SCANCODE_4,     0x5);
-	MAP(SDL_SCANCODE_5,     0x6);
-	MAP(SDL_SCANCODE_6,     0x7);
-	MAP(SDL_SCANCODE_7,     0x8);
-	MAP(SDL_SCANCODE_8,     0x9);
-	MAP(SDL_SCANCODE_9,     0xa);
-	MAP(SDL_SCANCODE_SEMICOLON, 0x27);
-	MAP(SDL_SCANCODE_EQUALS,    0xd);
-	MAPC(SDL_SCANCODE_LEFTBRACKET,   0x1a, 0x1b | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_BACKSLASH, 0x2b, 0x1c | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_RIGHTBRACKET,  0x1b, 0x1d | WITH_CONTROL_KEY);
-	MAP(SDL_SCANCODE_GRAVE, 0x29);
-	MAPC(SDL_SCANCODE_A,     0x1e, 0x1 | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_B,     0x30, 0x2 | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_C,     0x2e, 0x3 | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_D,     0x20, 0x4 | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_E,     0x12, 0x5 | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_F,     0x21, 0x6 | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_G,     0x22, 0x7 | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_H,     0x23, 0x8 | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_I,     0x17, 0x9 | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_J,     0x24, 0xa | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_K,     0x25, 0xb | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_L,     0x26, 0xc | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_M,     0x32, 0xd | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_N,     0x31, 0xe | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_O,     0x18, 0xf | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_P,     0x19, 0x10 | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_Q,     0x10, 0x11 | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_R,     0x13, 0x12 | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_S,     0x1f, 0x13 | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_T,     0x14, 0x14 | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_U,     0x16, 0x15 | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_V,     0x2f, 0x16 | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_W,     0x11, 0x17 | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_X,     0x2d, 0x18 | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_Y,     0x15, 0x19 | WITH_CONTROL_KEY);
-	MAPC(SDL_SCANCODE_Z,     0x2c, 0x1a | WITH_CONTROL_KEY);
-	MAP(SDL_SCANCODE_DELETE,    0xd3);
-	MAP(SDL_SCANCODE_KP_0,       0x52);
-	MAP(SDL_SCANCODE_KP_1,       0x4f);
-	MAP(SDL_SCANCODE_KP_2,       0x50);
-	MAP(SDL_SCANCODE_KP_3,       0x51);
-	MAP(SDL_SCANCODE_KP_4,       0x4b);
-	MAP(SDL_SCANCODE_KP_5,       0x4c);
-	MAP(SDL_SCANCODE_KP_6,       0x4d);
-	MAP(SDL_SCANCODE_KP_7,       0x47);
-	MAP(SDL_SCANCODE_KP_8,       0x48);
-	MAP(SDL_SCANCODE_KP_9,       0x49);
-	MAP(SDL_SCANCODE_KP_PERIOD, 0x53);
-	MAP(SDL_SCANCODE_KP_DIVIDE, 0xb5);
-	MAP(SDL_SCANCODE_KP_MULTIPLY,   0x37);
-	MAP(SDL_SCANCODE_KP_MINUS,  0x4a);
-	MAP(SDL_SCANCODE_KP_PLUS,   0x4e);
-	MAPC(SDL_SCANCODE_KP_ENTER,  0x9c, 0xd);
-	MAP(SDL_SCANCODE_UP,        0xc8);
-	MAP(SDL_SCANCODE_DOWN,      0xd0);
-	MAP(SDL_SCANCODE_RIGHT,     0xcd);
-	MAP(SDL_SCANCODE_LEFT,      0xcb);
-	MAP(SDL_SCANCODE_INSERT,    0xd2);
-	MAP(SDL_SCANCODE_HOME,      0xc7);
-	MAP(SDL_SCANCODE_END,       0xcf);
-	MAP(SDL_SCANCODE_PAGEUP,    0xc9);
-	MAP(SDL_SCANCODE_PAGEDOWN,  0xd1);
-	MAP(SDL_SCANCODE_F1,        0x3b);
-	MAP(SDL_SCANCODE_F2,        0x3c);
-	MAP(SDL_SCANCODE_F3,        0x3d);
-	MAP(SDL_SCANCODE_F4,        0x3e);
-	MAP(SDL_SCANCODE_F5,        0x3f);
-	MAP(SDL_SCANCODE_F6,        0x40);
-	MAP(SDL_SCANCODE_F7,        0x41);
-	MAP(SDL_SCANCODE_F8,        0x42);
-	MAP(SDL_SCANCODE_F9,        0x43);
-	MAP(SDL_SCANCODE_F10,       0x44);
-	MAP(SDL_SCANCODE_F11,       0x57);
-	MAP(SDL_SCANCODE_F12,       0x58);
-	MAP(SDL_SCANCODE_NUMLOCKCLEAR,   0x45);
-	MAP(SDL_SCANCODE_CAPSLOCK,  0x3a);
-	MAP(SDL_SCANCODE_SCROLLLOCK, 0x46);
-	MAP(SDL_SCANCODE_RSHIFT,    0x36);
-	MAP(SDL_SCANCODE_LSHIFT,    0x2a);
-	MAP(SDL_SCANCODE_RCTRL,     0x9d);
-	MAP(SDL_SCANCODE_LCTRL,     0x1d);
-	MAP(SDL_SCANCODE_RALT,      0xb8);
-	MAP(SDL_SCANCODE_LALT,      0x38);
-	MAP(SDL_SCANCODE_LGUI,    0xdb);  // win l
-	MAP(SDL_SCANCODE_RGUI,    0xdc);  // win r
-	MAP(SDL_SCANCODE_PRINTSCREEN,     -2);    // 0xaa + 0xb7
-	MAP(SDL_SCANCODE_SYSREQ,    0x54);  // alt+printscr
-	MAP(SDL_SCANCODE_APPLICATION,      0xdd);  // win menu?
+	MAPC(SDLK_BACKSPACE, 0xe, 0x8);
+	MAPC(SDLK_TAB,       0xf, 0x9);
+	MAPC(SDLK_RETURN,    0x1c, 0xd);
+	MAP(SDLK_PAUSE,     0x59);  // 0x1d + 0x45 + 0x9d + 0xc5
+	MAPC(SDLK_ESCAPE,    0x1, 0x1b);
+	MAP(SDLK_SPACE,     0x39);
+	MAP(SDLK_QUOTE,     0x28);
+	MAP(SDLK_COMMA,     0x33);
+	MAP(SDLK_MINUS,     0xc);
+	MAP(SDLK_PERIOD,    0x34);
+	MAP(SDLK_SLASH,     0x35);
+	MAP(SDLK_0,     0xb);
+	MAP(SDLK_1,     0x2);
+	MAP(SDLK_2,     0x3);
+	MAP(SDLK_3,     0x4);
+	MAP(SDLK_4,     0x5);
+	MAP(SDLK_5,     0x6);
+	MAP(SDLK_6,     0x7);
+	MAP(SDLK_7,     0x8);
+	MAP(SDLK_8,     0x9);
+	MAP(SDLK_9,     0xa);
+	MAP(SDLK_SEMICOLON, 0x27);
+	MAP(SDLK_EQUALS,    0xd);
+	MAPC(SDLK_LEFTBRACKET,   0x1a, 0x1b | WITH_CONTROL_KEY);
+	MAPC(SDLK_BACKSLASH, 0x2b, 0x1c | WITH_CONTROL_KEY);
+	MAPC(SDLK_RIGHTBRACKET,  0x1b, 0x1d | WITH_CONTROL_KEY);
+	MAP(SDLK_BACKQUOTE, 0x29);
+	MAPC(SDLK_a,     0x1e, 0x1 | WITH_CONTROL_KEY);
+	MAPC(SDLK_b,     0x30, 0x2 | WITH_CONTROL_KEY);
+	MAPC(SDLK_c,     0x2e, 0x3 | WITH_CONTROL_KEY);
+	MAPC(SDLK_d,     0x20, 0x4 | WITH_CONTROL_KEY);
+	MAPC(SDLK_e,     0x12, 0x5 | WITH_CONTROL_KEY);
+	MAPC(SDLK_f,     0x21, 0x6 | WITH_CONTROL_KEY);
+	MAPC(SDLK_g,     0x22, 0x7 | WITH_CONTROL_KEY);
+	MAPC(SDLK_h,     0x23, 0x8 | WITH_CONTROL_KEY);
+	MAPC(SDLK_i,     0x17, 0x9 | WITH_CONTROL_KEY);
+	MAPC(SDLK_j,     0x24, 0xa | WITH_CONTROL_KEY);
+	MAPC(SDLK_k,     0x25, 0xb | WITH_CONTROL_KEY);
+	MAPC(SDLK_l,     0x26, 0xc | WITH_CONTROL_KEY);
+	MAPC(SDLK_m,     0x32, 0xd | WITH_CONTROL_KEY);
+	MAPC(SDLK_n,     0x31, 0xe | WITH_CONTROL_KEY);
+	MAPC(SDLK_o,     0x18, 0xf | WITH_CONTROL_KEY);
+	MAPC(SDLK_p,     0x19, 0x10 | WITH_CONTROL_KEY);
+	MAPC(SDLK_q,     0x10, 0x11 | WITH_CONTROL_KEY);
+	MAPC(SDLK_r,     0x13, 0x12 | WITH_CONTROL_KEY);
+	MAPC(SDLK_s,     0x1f, 0x13 | WITH_CONTROL_KEY);
+	MAPC(SDLK_t,     0x14, 0x14 | WITH_CONTROL_KEY);
+	MAPC(SDLK_u,     0x16, 0x15 | WITH_CONTROL_KEY);
+	MAPC(SDLK_v,     0x2f, 0x16 | WITH_CONTROL_KEY);
+	MAPC(SDLK_w,     0x11, 0x17 | WITH_CONTROL_KEY);
+	MAPC(SDLK_x,     0x2d, 0x18 | WITH_CONTROL_KEY);
+	MAPC(SDLK_y,     0x15, 0x19 | WITH_CONTROL_KEY);
+	MAPC(SDLK_z,     0x2c, 0x1a | WITH_CONTROL_KEY);
+	MAP(SDLK_DELETE,    0xd3);
+	MAP(SDLK_KP0,       0x52);
+	MAP(SDLK_KP1,       0x4f);
+	MAP(SDLK_KP2,       0x50);
+	MAP(SDLK_KP3,       0x51);
+	MAP(SDLK_KP4,       0x4b);
+	MAP(SDLK_KP5,       0x4c);
+	MAP(SDLK_KP6,       0x4d);
+	MAP(SDLK_KP7,       0x47);
+	MAP(SDLK_KP8,       0x48);
+	MAP(SDLK_KP9,       0x49);
+	MAP(SDLK_KP_PERIOD, 0x53);
+	MAP(SDLK_KP_DIVIDE, 0xb5);
+	MAP(SDLK_KP_MULTIPLY,   0x37);
+	MAP(SDLK_KP_MINUS,  0x4a);
+	MAP(SDLK_KP_PLUS,   0x4e);
+	MAPC(SDLK_KP_ENTER,  0x9c, 0xd);
+	MAP(SDLK_UP,        0xc8);
+	MAP(SDLK_DOWN,      0xd0);
+	MAP(SDLK_RIGHT,     0xcd);
+	MAP(SDLK_LEFT,      0xcb);
+	MAP(SDLK_INSERT,    0xd2);
+	MAP(SDLK_HOME,      0xc7);
+	MAP(SDLK_END,       0xcf);
+	MAP(SDLK_PAGEUP,    0xc9);
+	MAP(SDLK_PAGEDOWN,  0xd1);
+	MAP(SDLK_F1,        0x3b);
+	MAP(SDLK_F2,        0x3c);
+	MAP(SDLK_F3,        0x3d);
+	MAP(SDLK_F4,        0x3e);
+	MAP(SDLK_F5,        0x3f);
+	MAP(SDLK_F6,        0x40);
+	MAP(SDLK_F7,        0x41);
+	MAP(SDLK_F8,        0x42);
+	MAP(SDLK_F9,        0x43);
+	MAP(SDLK_F10,       0x44);
+	MAP(SDLK_F11,       0x57);
+	MAP(SDLK_F12,       0x58);
+	MAP(SDLK_NUMLOCK,   0x45);
+	MAP(SDLK_CAPSLOCK,  0x3a);
+	MAP(SDLK_SCROLLOCK, 0x46);
+	MAP(SDLK_RSHIFT,    0x36);
+	MAP(SDLK_LSHIFT,    0x2a);
+	MAP(SDLK_RCTRL,     0x9d);
+	MAP(SDLK_LCTRL,     0x1d);
+	MAP(SDLK_RALT,      0xb8);
+	MAP(SDLK_LALT,      0x38);
+	MAP(SDLK_LSUPER,    0xdb);  // win l
+	MAP(SDLK_RSUPER,    0xdc);  // win r
+	MAP(SDLK_PRINT,     -2);    // 0xaa + 0xb7
+	MAP(SDLK_SYSREQ,    0x54);  // alt+printscr
+	MAP(SDLK_MENU,      0xdd);  // win menu?
 
 	return 0;
 }
-
