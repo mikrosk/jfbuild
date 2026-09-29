@@ -68,6 +68,9 @@ ifndef ARCHITECTURE
 	ifneq (,$(findstring i686-,$(TARGETMACHINE)))
 		ARCHITECTURE=X86
 	endif
+	ifneq (,$(findstring m68k-,$(TARGETMACHINE)))
+		ARCHITECTURE=M68K
+	endif
 endif
 
 # Suffix for executables run on the build host (e.g. bin2c), which may
@@ -129,10 +132,10 @@ ifeq ($(RENDERTYPE),WIN)
 endif
 
 # Until I work out how to deal with PIE and PIC, the x86 inline
-# assembly is hopelessly broken, so it's forced off for all.
-#ifneq ($(ARCHITECTURE),X86)
+# assembly is hopelessly broken, so it's forced off for all but m68k.
+ifneq ($(ARCHITECTURE),M68K)
 	USE_ASM=0
-#endif
+endif
 
 BUILDCPPFLAGS+= -DRENDERTYPE$(RENDERTYPE)=1
 
