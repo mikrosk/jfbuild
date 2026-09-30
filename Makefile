@@ -89,7 +89,9 @@ ENGINEOBJS= \
 	$(SRC)/smalltextfont.$o
 
 ifneq (0,$(USE_ASM))
-ifneq ($(ARCHITECTURE),M68K)
+ifeq ($(ARCHITECTURE),M68K)
+	ENGINEOBJS+= $(SRC)/a-68k.$o
+else
 	ENGINEOBJS+= $(SRC)/a.$o
 endif
 endif
@@ -224,6 +226,9 @@ include Makefile.deps
 # RULES
 $(SRC)/%.$o: $(SRC)/%.$(asm)
 	$(NASM) $(NASMFLAGS) $< -o $@
+
+$(SRC)/%.$o: $(SRC)/%.S
+	$(CC) $(CPPFLAGS) $(OURCPPFLAGS) $(CFLAGS) -c $< -o $@
 
 $(SRC)/%.$o: $(SRC)/%.c
 	$(CC) $(CPPFLAGS) $(OURCPPFLAGS) $(CFLAGS) $(OURCFLAGS) -c $< -o $@
