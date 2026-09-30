@@ -193,10 +193,12 @@ enginelib: $(ENGINELIB)
 editorlib: $(EDITORLIB)
 
 $(ENGINELIB): $(ENGINEOBJS)
+	rm -f $@
 	$(AR) rc $@ $^
 	$(RANLIB) $@
 
 $(EDITORLIB): $(EDITOROBJS)
+	rm -f $@
 	$(AR) rc $@ $^
 	$(RANLIB) $@
 

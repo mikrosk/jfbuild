@@ -3632,10 +3632,15 @@ static __inline void swapchar2(void *a, void *b, int s)
 // The 68060 lacks the 64-bit forms of muls.l and divs.l, so products are
 // done with the 32-bit muls.l and fall back to a full 64-bit product only
 // on overflow. Divisions are done by the FPU in extended precision, which
-// holds a 64-bit dividend exactly.
+// holds a 64-bit dividend exactly, and truncate through the FPU rounding
+// mode, which m68k_setfpuround() sets to round-to-zero for the lifetime
+// of the engine.
 //
 
 extern const float m68k_pow2[64];
+
+void m68k_setfpuround(void);
+void m68k_restorefpuround(void);
 
 // Signed 32x32->64 product from 16x16->32 partial products
 static inline void m68k_smul64(int a, int b, int *hi, unsigned int *lo)
@@ -3804,7 +3809,6 @@ static inline __attribute__((always_inline)) int m68k_divscale(int a, int b, int
 	__asm__ ("fmove.l %1,%%fp0\n\t"
 		"fmul.s %3,%%fp0\n\t"
 		"fdiv.l %2,%%fp0\n\t"
-		"fintrz.x %%fp0,%%fp0\n\t"
 		"fmove.l %%fp0,%0"
 		: "=d" (q) : "dmi" (a), "dmi" (b), "m" (m68k_pow2[n & 63]) : "fp0");
 	return q;
@@ -3817,7 +3821,6 @@ static inline __attribute__((always_inline)) int m68k_scale(int a, int b, int c)
 	__asm__ ("fmove.l %1,%%fp0\n\t"
 		"fmul.l %2,%%fp0\n\t"
 		"fdiv.l %3,%%fp0\n\t"
-		"fintrz.x %%fp0,%%fp0\n\t"
 		"fmove.l %%fp0,%0"
 		: "=d" (q) : "dmi" (a), "dmi" (b), "dmi" (c) : "fp0");
 	return q;
