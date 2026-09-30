@@ -30,6 +30,9 @@ void makeasmwriteable(void)
         return;
     }
 
+# elif defined __m68k__
+    // a-68k.S keeps its parameters in variables instead of patching code
+
 # elif defined __linux || defined __FreeBSD__ || defined __NetBSD__ || defined __OpenBSD__ || defined __APPLE__
     int pagesize;
     size_t dep_begin_page;
