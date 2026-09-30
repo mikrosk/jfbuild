@@ -4918,14 +4918,25 @@ static int loadtables(void)
 
 	initksqrt();
     for(i=0;i<2048;i++) {
-        sintable[i] = (short)(16384*sin((double)i*3.14159265358979/1024));
         reciptable[i] = divscale30(2048L,i+2048);
+    }
+#if defined(__GNUC__) && defined(__m68k__) && defined(__HAVE_68881__) && USE_ASM
+	// The m68k divscale needs the round-to-zero FPU mode, but the tables
+	// below must be computed in the default round-to-nearest mode to
+	// match their checksums.
+	m68k_restorefpuround();
+#endif
+    for(i=0;i<2048;i++) {
+        sintable[i] = (short)(16384*sin((double)i*3.14159265358979/1024));
     }
     for(i=0;i<640;i++) {
         radarang[i] = (short)(atan(((double)i-639.5)/160)*64*1024/3.14159265358979);
         radarang[1279-i] = -radarang[i];
     }
 	calcbritable();
+#if defined(__GNUC__) && defined(__m68k__) && defined(__HAVE_68881__) && USE_ASM
+	m68k_setfpuround();
+#endif
 
     // The checksums are of the tables' in-memory bytes, which depend on the byte order.
     if (crc32once((unsigned char *)sintable, sizeof(sintable)) != (B_BIG_ENDIAN ? 0x995645a5 : 0xee1e7aba)) {
@@ -5415,6 +5426,10 @@ int preinitengine(void)
 {
 	char compiler[30] = "an unidentified compiler";
 
+#if defined(__GNUC__) && defined(__m68k__) && defined(__HAVE_68881__) && USE_ASM
+	m68k_setfpuround();
+#endif
+
 #if defined(_MSC_VER)
 	sprintf(compiler, "MS Visual C++ %d.%02d", _MSC_VER/100, _MSC_VER%100);
 #elif defined(__clang__)
@@ -5564,6 +5579,10 @@ void uninitengine(void)
 	if (lookups != NULL) { kfree(lookups); lookups = NULL; }
 	for(i=0;i<MAXPALOOKUPS;i++)
 		if (palookup[i] != NULL) { kfree(palookup[i]); palookup[i] = NULL; }
+
+#if defined(__GNUC__) && defined(__m68k__) && defined(__HAVE_68881__) && USE_ASM
+	m68k_restorefpuround();
+#endif
 }
 
 

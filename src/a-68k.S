@@ -10,8 +10,7 @@
 | impractical, so every patched immediate is a variable in .bss instead
 | and the labels of the patch points are kept as variable names.
 | Instructions the 68060 leaves unimplemented (64-bit mul/div, movep,
-| cas2, chk2/cmp2, fint/fintrz and the transcendental FPU operations)
-| are not used.
+| cas2, chk2/cmp2 and the transcendental FPU operations) are not used.
 |
 | Register mapping is chosen per function and given in a comment at the
 | top of each one. Pixel packing is mirrored for big-endian longword
@@ -116,8 +115,7 @@ sethlinesizes:
 
 	ALIGN
 setvlinebpl:
-	move.l	ARG(0,0),%d0
-	move.l	%d0,fixchain			| fixchain1a/1b/1m/1t/1s, mfixchain1s,
+	move.l	ARG(0,0),fixchain	| fixchain1a/1b/1m/1t/1s, mfixchain1s,
 						| tfixchain1s, fixchain2a/2ma/2mb,
 						| fixchaint2a-e: bytes per line
 	rts
@@ -125,8 +123,7 @@ setvlinebpl:
 
 	ALIGN
 setpalookupaddress:
-	move.l	ARG(0,0),%d0
-	move.l	%d0,hpal			| pal1-8
+	move.l	ARG(0,0),hpal		| pal1-8
 	rts
 
 
@@ -175,7 +172,7 @@ setuphlineasm4:
 	|
 	| d0: temp (eax)          d4: bx, later bx<<xbits (esi)
 	| d1: 4 pixels (ebx)      d5: 32-xbits, later hmach1 (yinc)
-	| d2: paloffs+texel (ecx) d6: 32-ybits, later count (ebp)
+	| d2: paloffs+texel (ecx) d6: 32-ybits, later mask (hmach2)
 	| d3: by, later by/xint   d7: ybits
 	| a0: p (edi)             a3: palookup
 	| a1: count (ebp)         a4: hmach4 (xinc)
@@ -231,7 +228,6 @@ skipthe2byte:
 
 	addq.l	#1,%a0				| inc edi
 
-	move.l	%a1,%d6				| count (ebp) into a data register
 	tst.l	ARG(1,SAVED)			| add ebx, ebx / jc beginhline64
 	bmi.b	1f
 
@@ -244,6 +240,7 @@ skipthe2byte:
 1:
 	move.l	hmach1-hlinevars(%a5),%d5
 	move.l	hmach4-hlinevars(%a5),%a4
+	move.l	hmach2-hlinevars(%a5),%d6
 	bra.b	beginhline64
 	ALIGN
 prebeginhline64:
@@ -251,7 +248,7 @@ prebeginhline64:
 beginhline64:
 	move.l	%d3,%d0				| mov eax, edx
 	rol.l	%d7,%d0				| hmach3a: rol eax, ybits
-	and.l	hmach2-hlinevars(%a5),%d0	| hmach2a: and eax, mask
+	and.l	%d6,%d0				| hmach2a: and eax, mask
 	sub.l	%a4,%d4				| hmach4a: sub esi, xinc
 	subx.l	%d5,%d3				| hmach1a: sbb edx, yinc
 	subq.l	#4,%a0				| sub edi, 4
@@ -259,7 +256,7 @@ beginhline64:
 	move.l	%d3,%d0				| mov eax, edx
 
 	rol.l	%d7,%d0				| hmach3b: rol eax, ybits
-	and.l	hmach2-hlinevars(%a5),%d0	| hmach2b: and eax, mask
+	and.l	%d6,%d0				| hmach2b: and eax, mask
 	sub.l	%a4,%d4				| hmach4b: sub esi, xinc
 	subx.l	%d5,%d3				| hmach1b: sbb edx, yinc
 	move.b	(%a3,%d2.l),%d1			| pal4: mov bh, byte [ecx+palookup]
@@ -270,7 +267,7 @@ beginhline64:
 	rol.l	%d7,%d0				| hmach3c: rol eax, ybits
 	move.b	(%a3,%d2.l),%d1			| pal5: mov bl, byte [ecx+palookup]
 	ror.l	#8,%d1				| shl ebx, 16
-	and.l	hmach2-hlinevars(%a5),%d0	| hmach2c: and eax, mask
+	and.l	%d6,%d0				| hmach2c: and eax, mask
 	sub.l	%a4,%d4				| hmach4c: sub esi, xinc
 	subx.l	%d5,%d3				| hmach1c: sbb edx, yinc
 	move.b	(%a2,%d0.l),%d2			| hoffs6: mov cl, byte [eax+bufplc]
@@ -279,7 +276,7 @@ beginhline64:
 	|(
 
 	rol.l	%d7,%d0				| hmach3d: rol eax, ybits
-	and.l	hmach2-hlinevars(%a5),%d0	| hmach2d: and eax, mask
+	and.l	%d6,%d0				| hmach2d: and eax, mask
 	sub.l	%a4,%d4				| hmach4d: sub esi, xinc
 	subx.l	%d5,%d3				| hmach1d: sbb edx, yinc
 	move.b	(%a3,%d2.l),%d1			| pal6: mov bh, byte [ecx+palookup]
@@ -287,17 +284,18 @@ beginhline64:
 	move.b	(%a2,%d0.l),%d2			| hoffs7: mov cl, byte [eax+bufplc]
 	move.b	(%a3,%d2.l),%d1			| pal7: mov bl, byte [ecx+palookup]
 	ror.l	#8,%d1
-	subq.l	#4,%d6				| sub ebp, 4
-	bcc.b	prebeginhline64			| jnc prebeginhline64
+	subq.l	#4,%a1				| sub ebp, 4
+	move.l	%a1,%d0
+	bpl.b	prebeginhline64			| jnc prebeginhline64
 skipthe4byte:
 
-	btst	#1,%d6				| test ebp, 2
+	btst	#1,%d0				| test ebp, 2
 	beq.b	skipdrawthe2
 	move.w	%d1,2(%a0)			| rol ebx, 16 / mov word [edi+2], bx
 	subq.l	#2,%a0				| sub edi, 2
 	swap	%d1
 skipdrawthe2:
-	btst	#0,%d6				| test ebp, 1
+	btst	#0,%d0				| test ebp, 1
 	beq.b	skipdrawthe1
 	move.b	%d1,3(%a0)			| shr ebx, 24 / mov byte [edi+3], bl
 skipdrawthe1:
@@ -348,15 +346,13 @@ setupvlineasm:
 
 	ALIGN
 setupmvlineasm:
-	move.l	ARG(0,0),%d0
-	move.l	%d0,maskmach3a			| maskmach3a, machmv13-16
+	move.l	ARG(0,0),maskmach3a	| maskmach3a, machmv13-16
 	rts
 
 
 	ALIGN
 setuptvlineasm:
-	move.l	ARG(0,0),%d0
-	move.l	%d0,transmach3a
+	move.l	ARG(0,0),transmach3a
 	rts
 
 
@@ -388,8 +384,7 @@ prevlineasm1:
 	add.l	%d3,%d0				| add eax, edx
 	lsr.l	%d4,%d3				| premach3a: shr edx, 32
 	move.b	(%a2,%d3.l),%d3			| mov dl, byte [esi+edx]
-	move.b	(%a1,%d3.l),%d1			| mov cl, byte [ebx+edx]
-	move.b	%d1,(%a0)			| mov byte [edi], cl
+	move.b	(%a1,%d3.l),(%a0)		| mov cl, byte [ebx+edx] / mov byte [edi], cl
 	CDECLEND	%d2-%d5/%a2
 	rts
 
@@ -406,8 +401,7 @@ beginvline:
 	add.l	%d5,%a0				| fixchain1b: add edi, 320
 	move.b	(%a2,%d1.l),%d1			| mov bl, byte [esi+ebx]
 	add.l	%d0,%d3				| add edx, eax
-	move.b	(%a1,%d1.l),%d1			| mov bl, byte [ebp+ebx]
-	move.b	%d1,(%a0)			| mov byte [edi], bl
+	move.b	(%a1,%d1.l),(%a0)		| mov bl, byte [ebp+ebx] / mov byte [edi], bl
 	subq.l	#1,%d2				| dec ecx
 	bne.b	beginvline			| jnz short beginvline
 	move.l	%d3,%d0				| mov eax, edx
@@ -424,8 +418,7 @@ beginmvline:
 	move.b	(%a2,%d1.l),%d1			| mov bl, byte [esi+ebx]
 	cmp.b	#255,%d1			| cmp bl, 255
 	beq.b	skipmask1
-	move.b	(%a1,%d1.l),%d1			| maskmach3c: mov bl, [ebp+ebx]
-	move.b	%d1,(%a0)			| mov byte [edi], bl
+	move.b	(%a1,%d1.l),(%a0)		| maskmach3c: mov bl, [ebp+ebx] / mov byte [edi], bl
 skipmask1:
 	add.l	%d0,%d3				| add edx, eax
 	add.l	%d5,%a0				| fixchain1m: add edi, 320
@@ -439,8 +432,7 @@ skipmask1:
 
 	ALIGN
 fixtransluscence:
-	move.l	ARG(0,0),%d0
-	move.l	%d0,transmach4			| transmach4, tmach1-4, tran2traa-d
+	move.l	ARG(0,0),transmach4	| transmach4, tmach1-4, tran2traa-d
 	rts
 
 
@@ -484,8 +476,7 @@ settransreverse:
 	lsl.w	#8,%d0
 	move.b	(%a1,%d1.l),%d0			| transrev0/transmach3c: mov al, [ebx+paloffs]
 	.endif
-	move.b	(%a3,%d0.l),%d0			| transmach4: mov al, byte [eax+_transluc]
-	move.b	%d0,(%a0)			| mov byte [edi], al
+	move.b	(%a3,%d0.l),(%a0)		| transmach4: mov al, byte [eax+_transluc] / mov byte [edi], al
 1:						| skiptrans1:
 	add.l	%d6,%d3				| add edx, ebp
 	add.l	%d5,%a0				| fixchain1t: add edi, 320
@@ -524,63 +515,61 @@ endtvline:
 	| The x86 version packs the four vplc/vinc pairs into three
 	| registers with partial-register carries; here each column keeps
 	| its own vplc and vinc, and the four pixels are packed into d1
-	| for one longword store.
+	| for one longword store. Texture columns are at most 256 high, so
+	| the texel index fits the low word of d0.
 	|
-	| d0: temp               d4-d7: vplce[0..3] (esi/ebp/edx halves)
-	| d1: 4 pixels (ecx)     a0: p (edi)
-	| d2: texel              a1: cnt (machvline4end)
-	| d3: shift (machvsh1)   a2-a5: vince[0..3] (machvinc1-5)
-	|                        a6: bufplce/palookupoffse pointer
+	| d0: index, texel (ecx)  d4-d7: vince[0..3] (machvinc1-5)
+	| d1: 4 pixels (ecx)      a0: end of the columns (machvline4end)
+	| d2: p-end (edi)         a1: bufplce/palookupoffse pointer
+	| d3: shift (machvsh1)    a2-a5: vplce[0..3] (esi/ebp/edx halves)
 	.macro	VL4COL i, vplc, vinc
+	move.l	bufplce+4*\i,%a1
 	move.l	\vplc,%d0			| mov ecx, esi
 	lsr.l	%d3,%d0				| machvsh1: shr ecx, 32-sh
-	move.l	bufplce+4*\i,%a6
-	move.b	(%a6,%d0.l),%d2			| machvbuf: mov cl, byte [ecx+bufplce]
-	move.l	palookupoffse+4*\i,%a6
+	move.b	(%a1,%d0.l),%d0			| machvbuf: mov cl, byte [ecx+bufplce]
+	move.l	palookupoffse+4*\i,%a1
 	lsl.l	#8,%d1
-	move.b	(%a6,%d2.w),%d1			| machvpal: mov cl, byte [ecx+palookupoffse]
 	add.l	\vinc,\vplc			| machvinc: add esi, vince
+	move.b	(%a1,%d0.w),%d1			| machvpal: mov cl, byte [ecx+palookupoffse]
 	.endm
 
 	ALIGN
 vlineasm4:
-	CDECLBEGIN	%d2-%d7/%a2-%a6
-	move.l	ARG(0,11),%a1			| mov dword [machvline4end+2], eax
-	move.l	ARG(1,11),%a0
+	CDECLBEGIN	%d2-%d7/%a2-%a5
+	move.l	ARG(0,10),%d0
+	move.l	(ylookup,%d0.l*4),%d2		| mov eax, dword [ylookup+ecx*4]
+	move.l	ARG(1,10),%a0
+	add.l	%d2,%a0				| add eax, edi / mov dword [machvline4end+2], eax
+	neg.l	%d2				| sub edi, eax
 
-	move.l	bufplce,%a6			| machvbuf1-4, machvpal1-4 are read
-						| from the arrays in the loop
 	move.l	machvsh,%d3
 
-	move.l	vince,%a2			| machvinc1-5
-	move.l	vince+4,%a3
-	move.l	vince+8,%a4
-	move.l	vince+12,%a5
+	move.l	vince,%d4			| machvinc1-5
+	move.l	vince+4,%d5
+	move.l	vince+8,%d6
+	move.l	vince+12,%d7
 
-	move.l	vplce,%d4
-	move.l	vplce+4,%d5
-	move.l	vplce+8,%d6
-	move.l	vplce+12,%d7
+	move.l	vplce,%a2
+	move.l	vplce+4,%a3
+	move.l	vplce+8,%a4
+	move.l	vplce+12,%a5
 
-	moveq	#0,%d2
 	ALIGN
 beginvlineasm4:
-	VL4COL	0, %d4, %a2
-	VL4COL	1, %d5, %a3
-	VL4COL	2, %d6, %a4
-	VL4COL	3, %d7, %a5
-	move.l	%d1,(%a0)			| machvline4end: mov dword [edi+end], ecx
-	add.l	fixchain,%a0			| fixchain2a: add edi, bpl
-	subq.l	#1,%a1
-	move.l	%a1,%d0
-	bne.w	beginvlineasm4			| jnc short beginvlineasm4
+	VL4COL	0, %a2, %d4
+	VL4COL	1, %a3, %d5
+	VL4COL	2, %a4, %d6
+	VL4COL	3, %a5, %d7
+	move.l	%d1,(%a0,%d2.l)			| machvline4end: mov dword [edi+end], ecx
+	add.l	fixchain,%d2			| fixchain2a: add edi, bpl
+	bcc.w	beginvlineasm4			| jnc short beginvlineasm4
 
-	move.l	%d4,vplce			| mov dword [vplce], ebp
-	move.l	%d5,vplce+4			| mov dword [vplce+4], ebp
-	move.l	%d6,vplce+8			| mov dword [vplce+8], esi
-	move.l	%d7,vplce+12			| mov dword [vplce+12], esi
+	move.l	%a2,vplce			| mov dword [vplce], ebp
+	move.l	%a3,vplce+4			| mov dword [vplce+4], ebp
+	move.l	%a4,vplce+8			| mov dword [vplce+8], esi
+	move.l	%a5,vplce+12			| mov dword [vplce+12], esi
 
-	CDECLEND	%d2-%d7/%a2-%a6
+	CDECLEND	%d2-%d7/%a2-%a5
 	rts
 
 
@@ -590,62 +579,60 @@ beginvlineasm4:
 	| jumps into a table of 16 store sequences (mvcase0-15); here
 	| each pixel is stored on its own when it is not masked.
 	|
-	| d0: temp (eax)         d4-d7: vplce[0..3] (ecx/edx/esi/ebp)
-	| d1: pixel (ebx)        a0: p (edi)
-	| d2: texel              a1: cnt (cl/bh, asm3)
-	| d3: shift (machmv13)   a2-a5: vince[0..3] (machmv3/6/9/12)
-	|                        a6: bufplce/palookupoffse pointer
+	| d0: index, texel (eax)  d4-d7: vince[0..3] (machmv3/6/9/12)
+	| d2: p-end (edi)         a0: end of the columns
+	| d3: shift (machmv13)    a1: bufplce/palookupoffse pointer
+	|                         a2-a5: vplce[0..3] (ecx/edx/esi/ebp)
 	.macro	MVL4COL i, vplc, vinc
+	move.l	bufplce+4*\i,%a1
 	move.l	\vplc,%d0			| mov eax, ecx
 	lsr.l	%d3,%d0				| machmv13-16: shr eax, 32
-	move.l	bufplce+4*\i,%a6
-	move.b	(%a6,%d0.l),%d2			| machmv1/4/7/10: mov al, byte [eax+bufplce]
+	move.b	(%a1,%d0.l),%d0			| machmv1/4/7/10: mov al, byte [eax+bufplce]
+	move.l	palookupoffse+4*\i,%a1
 	add.l	\vinc,\vplc			| machmv3/6/9/12: add ecx, vince
-	cmp.b	#255,%d2			| cmp al, 255
+	cmp.b	#255,%d0			| cmp al, 255
 	beq.b	1f				| adc dl, dl
-	move.l	palookupoffse+4*\i,%a6
-	move.b	(%a6,%d2.w),%d1			| machmv2/5/8/11: mov bl, byte [eax+palookupoffs]
-	move.b	%d1,\i(%a0)			| mvcase: mov byte [edi+i], bl
+	move.b	(%a1,%d0.w),\i(%a0,%d2.l)	| machmv2/5/8/11: mov bl, byte [eax+palookupoffs] / mvcase: mov byte [edi+i], bl
 1:
 	.endm
 
 	ALIGN
 mvlineasm4:
-	CDECLBEGIN	%d2-%d7/%a2-%a6
-	move.l	ARG(0,11),%a1
-	move.l	ARG(1,11),%a0
+	CDECLBEGIN	%d2-%d7/%a2-%a5
+	move.l	ARG(0,10),%d0			| the x86 counts the rows in cl and bh
+	move.l	(ylookup,%d0.l*4),%d2
+	move.l	ARG(1,10),%a0
+	add.l	%d2,%a0
+	neg.l	%d2
 
 	move.l	maskmach3a,%d3
 
-	move.l	vince,%a2
-	move.l	vince+4,%a3
-	move.l	vince+8,%a4
-	move.l	vince+12,%a5
+	move.l	vince,%d4
+	move.l	vince+4,%d5
+	move.l	vince+8,%d6
+	move.l	vince+12,%d7
 
-	move.l	vplce,%d4
-	move.l	vplce+4,%d5
-	move.l	vplce+8,%d6
-	move.l	vplce+12,%d7
+	move.l	vplce,%a2
+	move.l	vplce+4,%a3
+	move.l	vplce+8,%a4
+	move.l	vplce+12,%a5
 
-	moveq	#0,%d2
 	ALIGN
 beginmvlineasm4:
-	MVL4COL	0, %d4, %a2
-	MVL4COL	1, %d5, %a3
-	MVL4COL	2, %d6, %a4
-	MVL4COL	3, %d7, %a5
-	add.l	fixchain,%a0			| fixchain2mb: add edi, 320
-	subq.l	#1,%a1				| dec cl
-	move.l	%a1,%d0
-	bne.w	beginmvlineasm4			| jz near endmvlineasm4
+	MVL4COL	0, %a2, %d4
+	MVL4COL	1, %a3, %d5
+	MVL4COL	2, %a4, %d6
+	MVL4COL	3, %a5, %d7
+	add.l	fixchain,%d2			| fixchain2mb: add edi, 320
+	bcc.w	beginmvlineasm4			| jz near endmvlineasm4
 endmvlineasm4:
 
-	move.l	%d4,vplce			| mov dword [vplce], ecx
-	move.l	%d5,vplce+4			| mov dword [vplce+4], edx
-	move.l	%d6,vplce+8			| mov dword [vplce+8], esi
-	move.l	%d7,vplce+12			| mov dword [vplce+12], ebp
+	move.l	%a2,vplce			| mov dword [vplce], ecx
+	move.l	%a3,vplce+4			| mov dword [vplce+4], edx
+	move.l	%a4,vplce+8			| mov dword [vplce+8], esi
+	move.l	%a5,vplce+12			| mov dword [vplce+12], ebp
 
-	CDECLEND	%d2-%d7/%a2-%a6
+	CDECLEND	%d2-%d7/%a2-%a5
 	rts
 
 	.bss
@@ -680,8 +667,7 @@ transrev:	.long	0
 	add.l	ARG(3,1),%d0			| add eax, edx
 	move.l	%d0,\mach5
 
-	move.l	ARG(2,1),%d0
-	move.l	%d0,\mach3			| yinc's
+	move.l	ARG(2,1),\mach3		| yinc's
 
 	move.l	(%sp)+,%d2
 	rts
@@ -697,8 +683,8 @@ setupspritevline:
 	| d0: texel (eax)          d6: smach2
 	| d1: x (ebx)              d7: smach5
 	| d2: cnt (ecx)            a0: p (edi)
-	| d3: y (edx)              a2: copy of d4 for the load
-	| d4: yplc (esi)           a3: palookup (spal)
+	| d3: y (edx)              a2: bufplc (esi)
+	| d4: offset from bufplc   a3: palookup (spal)
 	| d5: smach1               a4: smach3
 	|                          a5: bytes per line (fixchain1s)
 	.macro	SPRITEVLINEBEGIN pal, mach1, mach2, mach3, mach5
@@ -707,7 +693,8 @@ setupspritevline:
 	move.l	ARG(1,10),%d1
 	move.l	ARG(2,10),%d2
 	move.l	ARG(3,10),%d3
-	move.l	ARG(4,10),%d4
+	move.l	ARG(4,10),%a2
+	moveq	#0,%d4
 	move.l	ARG(5,10),%a0
 	move.l	\pal,%a3
 	move.l	\mach1,%d5
@@ -723,13 +710,11 @@ spritevline:
 	bra.b	spritevline_start
 prestartsvline:
 	add.l	%d5,%d1				| smach1: add ebx, xincshl16
-	move.l	%d4,%a2
-	move.b	(%a2),%d0			| mov al, byte [esi]
+	move.b	(%a2,%d4.l),%d0			| mov al, byte [esi]
 	addx.l	%d6,%d4				| smach2: adc esi, xincshr16+yalwaysinc
 
 startsvline:
-	move.b	(%a3,%d0.l),%d0			| spal: mov al, [eax+palookup]
-	move.b	%d0,(%a0)			| mov byte [edi], al
+	move.b	(%a3,%d0.l),(%a0)		| spal: mov al, [eax+palookup] / mov byte [edi], al
 	add.l	%a5,%a0				| fixchain1s: add edi, 320
 
 spritevline_start:
@@ -738,8 +723,7 @@ spritevline_start:
 	add.l	%a4,%d3				| smach3: add edx, dayinc
 	bcc.b	prestartsvline			| ja short prestartsvline	;jump if (no carry (add)) and (not zero (dec))!
 	add.l	%d5,%d1				| smach4: add ebx, xincshl16
-	move.l	%d4,%a2
-	move.b	(%a2),%d0			| mov al, byte [esi]
+	move.b	(%a2,%d4.l),%d0			| mov al, byte [esi]
 	addx.l	%d7,%d4				| smach5: adc esi, xincshr16+yalwaysinc+daydime
 	bra.b	startsvline
 endsvline:
@@ -759,15 +743,13 @@ mspritevline:
 	| eax = 0, ebx = x, ecx = cnt, edx = y, esi = yplc, edi = p
 mprestartsvline:
 	add.l	%d5,%d1				| msmach1: add ebx, xincshl16
-	move.l	%d4,%a2
-	move.b	(%a2),%d0			| mov al, byte [esi]
+	move.b	(%a2,%d4.l),%d0			| mov al, byte [esi]
 	addx.l	%d6,%d4				| msmach2: adc esi, xincshr16+yalwaysinc
 
 mstartsvline:
 	cmp.b	#255,%d0			| cmp al, 255
 	beq.b	mskipsvline
-	move.b	(%a3,%d0.l),%d0			| mspal: mov al, [eax+palookup]
-	move.b	%d0,(%a0)			| mov byte [edi], al
+	move.b	(%a3,%d0.l),(%a0)		| mspal: mov al, [eax+palookup] / mov byte [edi], al
 mskipsvline:
 	add.l	%a5,%a0				| mfixchain1s: add edi, 320
 
@@ -777,8 +759,7 @@ mspritevline_start:
 	add.l	%a4,%d3				| msmach3: add edx, dayinc
 	bcc.b	mprestartsvline			| ja short mprestartsvline	;jump if (no carry (add)) and (not zero (dec))!
 	add.l	%d5,%d1				| msmach4: add ebx, xincshl16
-	move.l	%d4,%a2
-	move.b	(%a2),%d0			| mov al, byte [esi]
+	move.b	(%a2,%d4.l),%d0			| mov al, byte [esi]
 	addx.l	%d7,%d4				| msmach5: adc esi, xincshr16+yalwaysinc+daydime
 	bra.b	mstartsvline
 mendsvline:
@@ -797,18 +778,17 @@ tsetupspritevline:
 	| d1: transluc index (ebx) d7: x (ebp)
 	| d2: tsmach5              a0: p (edi)
 	| d3: y (edx)              a1: transluc (tmach4)
-	| d4: yplc (esi)           a2: copy of d4 for the load
-	| d5: tsmach1              a3: palookup (tspal)
-	| cnt (ecx) stays in its argument slot on the stack
+	| d4: offset from bufplc   a2: bufplc (esi)
+	| d5: cnt (ecx)            a3: palookup (tspal)
 	|                          a4: tsmach3
 	|                          a5: bytes per line (tfixchain1s)
+	|                          a6: tsmach1
 	.macro	TSPRITEVLINE rev
 	bra.b	tenterspritevline\rev
 	ALIGN
 tprestartsvline\rev:
-	add.l	%d5,%d7				| tsmach1: add ebp, xincshl16
-	move.l	%d4,%a2
-	move.b	(%a2),%d0			| mov al, byte [esi]
+	add.l	%a6,%d7				| tsmach1: add ebp, xincshl16
+	move.b	(%a2,%d4.l),%d0			| mov al, byte [esi]
 	addx.l	%d6,%d4				| tsmach2: adc esi, xincshr16+yalwaysinc
 
 tstartsvline\rev:
@@ -823,19 +803,17 @@ tstartsvline\rev:
 	lsl.w	#8,%d1
 	move.b	(%a3,%d0.l),%d1			| transrev3/tspal: mov bl, [eax+palookup]
 	.endif
-	move.b	(%a1,%d1.l),%d0			| tmach4: mov al, byte [ebx+_transluc]
-	move.b	%d0,(%a0)			| mov byte [edi], al
+	move.b	(%a1,%d1.l),(%a0)		| tmach4: mov al, byte [ebx+_transluc] / mov byte [edi], al
 tskipsvline\rev:
 	add.l	%a5,%a0				| tfixchain1s: add edi, 320
 
 tenterspritevline\rev:
-	subq.l	#1,ARG(2,10)			| dec ecx
+	subq.l	#1,%d5				| dec ecx
 	beq.b	tendsvline\rev			| jz short tendsvline
 	add.l	%a4,%d3				| tsmach3: add edx, dayinc
 	bcc.b	tprestartsvline\rev		| ja short tprestartsvline	;jump if (no carry (add)) and (not zero (dec))!
-	add.l	%d5,%d7				| tsmach4: add ebp, xincshl16
-	move.l	%d4,%a2
-	move.b	(%a2),%d0			| mov al, byte [esi]
+	add.l	%a6,%d7				| tsmach4: add ebp, xincshl16
+	move.b	(%a2,%d4.l),%d0			| mov al, byte [esi]
 	addx.l	%d2,%d4				| tsmach5: adc esi, xincshr16+yalwaysinc+daydime
 	bra.b	tstartsvline\rev
 tendsvline\rev:
@@ -843,15 +821,17 @@ tendsvline\rev:
 
 	ALIGN
 tspritevline:
-	CDECLBEGIN	%d2-%d7/%a2-%a5
-	move.l	ARG(0,10),%d0
-	move.l	ARG(1,10),%d7			| mov ebp, ebx
-	move.l	ARG(3,10),%d3
-	move.l	ARG(4,10),%d4
-	move.l	ARG(5,10),%a0
+	CDECLBEGIN	%d2-%d7/%a2-%a6
+	move.l	ARG(0,11),%d0
+	move.l	ARG(1,11),%d7			| mov ebp, ebx
+	move.l	ARG(2,11),%d5
+	move.l	ARG(3,11),%d3
+	move.l	ARG(4,11),%a2
+	moveq	#0,%d4
+	move.l	ARG(5,11),%a0
 	move.l	transmach4,%a1
 	move.l	tspal,%a3
-	move.l	tsmach1,%d5
+	move.l	tsmach1,%a6
 	move.l	tsmach2,%d6
 	move.l	tsmach3,%a4
 	move.l	tsmach5,%d2
@@ -864,7 +844,7 @@ tspritevline:
 tspritevline_rev:
 	TSPRITEVLINE	1
 tendspritevline:
-	CDECLEND	%d2-%d7/%a2-%a5
+	CDECLEND	%d2-%d7/%a2-%a6
 	rts
 
 	.bss
@@ -924,12 +904,14 @@ msethlineshift:
 	| d3: texel 1 (cl)         a3: shadeoffs (mmach2d)
 	| d4: by (esi)             a4: bxinc (mmach3d)
 	|                          a5: byinc (mmach4d)
+	|                          a6: 2<<16, the count step of a pair
 	.macro	MHLINEBEGIN buf, pal, xinc, yinc, sh1, sh2, negsh2
-	CDECLBEGIN	%d2-%d7/%a2-%a5
-	move.l	ARG(1,10),%d1
-	move.l	ARG(2,10),%d2
-	move.l	ARG(4,10),%d4
-	move.l	ARG(5,10),%a0
+	CDECLBEGIN	%d2-%d7/%a2-%a6
+	move.l	ARG(1,11),%d1
+	move.l	ARG(2,11),%d2
+	move.l	ARG(4,11),%d4
+	move.l	ARG(5,11),%a0
+	move.l	#131072,%a6
 	move.l	\buf,%a2
 	move.l	\pal,%a3
 	move.l	\xinc,%a4
@@ -968,14 +950,10 @@ msethlineshift:
 
 	ALIGN
 mhline:
-	move.l	ARG(0,0),%d0
-	move.l	%d0,mmach1d			| mmach1d, mmach5d, mmach9d
-	move.l	asm3,%d0
-	move.l	%d0,mmach2d			| mmach2d, mmach2da, mmach2db, mmach6d, mmach10d
-	move.l	asm1,%d0
-	move.l	%d0,mmach3d			| mmach3d, mmach7d
-	move.l	asm2,%d0
-	move.l	%d0,mmach4d			| mmach4d, mmach8d
+	move.l	ARG(0,0),mmach1d	| mmach1d, mmach5d, mmach9d
+	move.l	asm3,mmach2d		| mmach2d, mmach2da, mmach2db, mmach6d, mmach10d
+	move.l	asm1,mmach3d		| mmach3d, mmach7d
+	move.l	asm2,mmach4d		| mmach4d, mmach8d
 						| falls into mhlineskipmodify
 
 
@@ -1001,8 +979,7 @@ mhlineskipmodify_nosetup:
 	cmp.b	#255,%d0			| cmp al, 255
 	beq.b	mskip5
 
-	move.b	(%a3,%d0.l),%d3			| mmach10d: mov cl, byte [eax+shadeoffs]
-	move.b	%d3,(%a0)			| mov byte [edi], cl
+	move.b	(%a3,%d0.l),(%a0)		| mmach10d: mov cl, byte [eax+shadeoffs] / mov byte [edi], cl
 mskip5:
 	addq.l	#1,%a0				| inc edi
 	sub.l	#65536,%d2			| sub ecx, 65536
@@ -1011,12 +988,11 @@ mskip5:
 
 	ALIGN
 mpreprebeghline:				| 1st only
-	move.b	(%a3,%d3.l),%d0			| mov al, cl / mmach2d: mov al, byte [eax+shadeoffs]
-	move.b	%d0,(%a0)			| mov byte [edi], al
+	move.b	(%a3,%d3.l),(%a0)		| mov al, cl / mmach2d: mov al, byte [eax+shadeoffs] / mov byte [edi], al
 
 mprebeghline:
 	addq.l	#2,%a0				| add edi, 2
-	sub.l	#131072,%d2			| sub ecx, 131072
+	sub.l	%a6,%d2				| sub ecx, 131072
 	bcs.w	mendhline			| jc near mendhline
 mbeghline:
 	MHLINEPAIR
@@ -1031,21 +1007,20 @@ mbeghline:
 	move.b	(%a3,%d0.l),%d1			| mov al, ch / mmach2db: mov bh, byte [eax+shadeoffs]
 	move.w	%d1,(%a0)			| mov word [edi], bx
 	addq.l	#2,%a0				| add edi, 2
-	sub.l	#131072,%d2			| sub ecx, 131072
+	sub.l	%a6,%d2				| sub ecx, 131072
 	bcc.b	mbeghline			| jnc short mbeghline
 	bra.b	mendhline
 mskip1:						| 2nd only
 	cmp.b	#255,%d0			| cmp ch, 255
 	beq.b	mprebeghline
 
-	move.b	(%a3,%d0.l),%d0			| mov al, ch / mmach6d: mov al, byte [eax+shadeoffs]
-	move.b	%d0,1(%a0)			| mov byte [edi+1], al
+	move.b	(%a3,%d0.l),1(%a0)		| mov al, ch / mmach6d: mov al, byte [eax+shadeoffs] / mov byte [edi+1], al
 	addq.l	#2,%a0				| add edi, 2
-	sub.l	#131072,%d2			| sub ecx, 131072
+	sub.l	%a6,%d2				| sub ecx, 131072
 	bcc.b	mbeghline			| jnc short mbeghline
 mendhline:
 
-	CDECLEND	%d2-%d7/%a2-%a5
+	CDECLEND	%d2-%d7/%a2-%a6
 	rts
 
 
@@ -1094,8 +1069,7 @@ tsethlineshift:
 	lsl.w	#8,%d1
 	move.b	(%a3,%d0.l),%d1			| transrev4/tmach10d: mov dl, byte [eax+shadeoffs]
 	.endif
-	move.b	(%a1,%d1.l),%d0			| tmach1: mov al, byte [edx+_transluc]
-	move.b	%d0,(%a0)			| mov byte [edi], al
+	move.b	(%a1,%d1.l),(%a0)		| tmach1: mov al, byte [edx+_transluc] / mov byte [edi], al
 tskip5\rev:
 	addq.l	#1,%a0				| inc edi
 	sub.l	#65536,%d2			| sub ecx, 65536
@@ -1105,7 +1079,7 @@ tskip5\rev:
 	ALIGN
 tprebeghline\rev:
 	addq.l	#2,%a0				| add edi, 2
-	sub.l	#131072,%d2			| sub ecx, 131072
+	sub.l	%a6,%d2				| sub ecx, 131072
 	bcs.w	tendhline\rev			| jc short tendhline
 tbeghline\rev:
 	MHLINEPAIR				| tmach3d, tsh3d, tsh4d, tmach4d, tmach1d,
@@ -1128,8 +1102,7 @@ tbeghline\rev:
 	lsl.w	#8,%d1
 	move.b	(%a3,%d3.l),%d1			| transrev6/tmach2d: mov dl, byte [eax+shadeoffs]
 	.endif
-	move.b	(%a1,%d1.l),%d3			| tmach2: mov al, byte [edx+_transluc]
-	move.b	%d3,(%a0)			| mov byte [edi], al
+	move.b	(%a1,%d1.l),(%a0)		| tmach2: mov al, byte [edx+_transluc] / mov byte [edi], al
 
 	cmp.b	#255,%d0			| cmp ch, 255
 	beq.b	tskip2\rev
@@ -1144,26 +1117,21 @@ tskip1\rev:
 	lsl.w	#8,%d1
 	move.b	(%a3,%d0.l),%d1			| transrev8/tmach6d: mov dl, byte [eax+shadeoffs]
 	.endif
-	move.b	(%a1,%d1.l),%d0			| tmach3: mov al, byte [edx+_transluc]
-	move.b	%d0,1(%a0)			| mov byte [edi+1], al
+	move.b	(%a1,%d1.l),1(%a0)		| tmach3: mov al, byte [edx+_transluc] / mov byte [edi+1], al
 tskip2\rev:
 
 	addq.l	#2,%a0				| add edi, 2
-	sub.l	#131072,%d2			| sub ecx, 131072
+	sub.l	%a6,%d2				| sub ecx, 131072
 	bcc.w	tbeghline\rev			| jnc tbeghline
 tendhline\rev:
 	.endm
 
 	ALIGN
 thline:
-	move.l	ARG(0,0),%d0
-	move.l	%d0,tmach1d			| tmach1d, tmach5d, tmach9d
-	move.l	asm3,%d0
-	move.l	%d0,tmach2d			| tmach2d, tmach6d, tmach10d
-	move.l	asm1,%d0
-	move.l	%d0,tmach3d			| tmach3d, tmach7d
-	move.l	asm2,%d0
-	move.l	%d0,tmach4d			| tmach4d, tmach8d
+	move.l	ARG(0,0),tmach1d	| tmach1d, tmach5d, tmach9d
+	move.l	asm3,tmach2d		| tmach2d, tmach6d, tmach10d
+	move.l	asm1,tmach3d		| tmach3d, tmach7d
+	move.l	asm2,tmach4d		| tmach4d, tmach8d
 						| falls into thlineskipmodify
 
 
@@ -1180,7 +1148,7 @@ thline_rev:
 	THLINE	1
 thline_end:
 
-	CDECLEND	%d2-%d7/%a2-%a5
+	CDECLEND	%d2-%d7/%a2-%a6
 	rts
 
 	.bss
@@ -1205,12 +1173,9 @@ tmach4d:	.long	0
 	| eax=shiftval, ebx=palookup1, ecx=palookup2
 	ALIGN
 setuptvlineasm2:
-	move.l	ARG(0,0),%d0
-	move.l	%d0,tran2shra			| tran2shra, tran2shrb
-	move.l	ARG(1,0),%d0
-	move.l	%d0,tran2pala			| tran2pala, tran2palc
-	move.l	ARG(2,0),%d0
-	move.l	%d0,tran2palb			| tran2palb, tran2pald
+	move.l	ARG(0,0),tran2shra	| tran2shra, tran2shrb
+	move.l	ARG(1,0),tran2pala	| tran2pala, tran2palc
+	move.l	ARG(2,0),tran2palb	| tran2palb, tran2pald
 	rts
 
 	| Pass:   eax=vplc2, ebx=vinc1, ecx=bufplc1, edx=bufplc2, esi=vplc1, edi=p
@@ -1227,12 +1192,12 @@ setuptvlineasm2:
 	|
 	| d0: transluc index 1 (eax)  d7: videoplc-pend (edi), the
 	| d1: transluc index 2 (ebx)      loop condition
-	| d2: ndat1 (ecx)             a0: videoplc
+	| d2: ndat1 (ecx)
 	| d3: ndat2 (edx)             a1: bytes per line (fixchaint2a)
 	| d4: vplc1 (esi)             a2: bufplc1 (tran2bufa)
 	| d5: vplc2 (ebp)             a3: bufplc2 (tran2bufb)
 	| d6: globalshift (tran2shra) a4: palookup1 (tran2pala)
-	|                             a5: palookup2 (tran2palb)
+	| a0: pend (tran2edia-f)      a5: palookup2 (tran2palb)
 	|                             a6: transluc (tran2traa)
 	.macro	TVLINE2 rev
 	bra.b	begintvline2\rev
@@ -1243,16 +1208,14 @@ skipdraw2\rev:
 	.if \rev
 	move.b	(%a4,%d2.l),%d0			| transrev11/tran2palc: mov ah, byte [ecx+palookup1]
 	lsl.w	#8,%d0
-	move.b	(%a0),%d0			| transrev10/tran2edic: mov al, byte [edi+pend]	;getpixel
+	move.b	(%a0,%d7.l),%d0			| transrev10/tran2edic: mov al, byte [edi+pend]	;getpixel
 	.else
-	move.b	(%a0),%d0			| transrev10/tran2edic: mov ah, byte [edi+pend]	;getpixel
+	move.b	(%a0,%d7.l),%d0			| transrev10/tran2edic: mov ah, byte [edi+pend]	;getpixel
 	lsl.w	#8,%d0
 	move.b	(%a4,%d2.l),%d0			| transrev11/tran2palc: mov al, byte [ecx+palookup1]
 	.endif
-	move.b	(%a6,%d0.l),%d1			| tran2trac: mov bl, byte [eax+_transluc]
-	move.b	%d1,(%a0)			| tran2edid: mov byte [edi+pend-320], bl	;drawpixel
+	move.b	(%a6,%d0.l),(%a0,%d7.l)		| tran2trac: mov bl, byte [eax+_transluc] / tran2edid: mov byte [edi+pend-320], bl	;drawpixel
 	add.l	%a1,%d7				| fixchaint2d: add edi, 320
-	add.l	%a1,%a0
 	bcc.b	begintvline2\rev		| jnc short begintvline2
 	bra.w	endtvline2\rev
 
@@ -1260,7 +1223,6 @@ skipdraw1\rev:
 	cmp.b	#255,%d3			| cmp dl, 255
 	bne.b	skipdraw3\rev
 	add.l	%a1,%d7				| fixchaint2b: add edi, 320
-	add.l	%a1,%a0
 	bcs.w	endtvline2\rev			| jc short endtvline2
 
 begintvline2\rev:
@@ -1286,15 +1248,15 @@ begintvline2\rev:
 	.if \rev
 	move.b	(%a4,%d2.l),%d0			| transrev14/tran2pala: mov ah, byte [ecx+palookup1]
 	lsl.w	#8,%d0
-	move.b	(%a0),%d0			| transrev12/13/tran2edia: mov al, byte [edi+pend]
+	move.b	(%a0,%d7.l),%d0			| transrev12/13/tran2edia: mov al, byte [edi+pend]
 	move.b	(%a5,%d3.l),%d1			| transrev15/tran2palb: mov bh, byte [edx+palookup2]
 	lsl.w	#8,%d1
-	move.b	1(%a0),%d1			| mov bl, byte [edi+pend+1]
+	move.b	1(%a0,%d7.l),%d1		| mov bl, byte [edi+pend+1]
 	.else
-	move.b	(%a0),%d0			| transrev12/13/tran2edia: mov ah, byte [edi+pend]	;getpixels
+	move.b	(%a0,%d7.l),%d0			| transrev12/13/tran2edia: mov ah, byte [edi+pend]	;getpixels
 	lsl.w	#8,%d0
 	move.b	(%a4,%d2.l),%d0			| transrev14/tran2pala: mov al, byte [ecx+palookup1]
-	move.b	1(%a0),%d1			| mov bh, byte [edi+pend+1]
+	move.b	1(%a0,%d7.l),%d1		| mov bh, byte [edi+pend+1]
 	lsl.w	#8,%d1
 	move.b	(%a5,%d3.l),%d1			| transrev15/tran2palb: mov bl, byte [edx+palookup2]
 	.endif
@@ -1302,9 +1264,8 @@ begintvline2\rev:
 	move.b	(%a6,%d1.l),%d1			| tran2trab: mov ah, byte [ebx+_transluc]
 	lsl.w	#8,%d0
 	move.b	%d1,%d0
-	move.w	%d0,(%a0)			| tran2edib: mov word [edi+pend-320], ax	;drawpixels
+	move.w	%d0,(%a0,%d7.l)			| tran2edib: mov word [edi+pend-320], ax	;drawpixels
 	add.l	%a1,%d7				| fixchaint2c: add edi, 320
-	add.l	%a1,%a0
 	bcc.b	begintvline2\rev		| jnc short begintvline2
 	bra.b	endtvline2\rev
 
@@ -1313,16 +1274,14 @@ skipdraw3\rev:
 	.if \rev
 	move.b	(%a5,%d3.l),%d0			| transrev17/tran2pald: mov ah, byte [edx+palookup2]
 	lsl.w	#8,%d0
-	move.b	1(%a0),%d0			| transrev16/tran2edie: mov al, byte [edi+pend+1]	;getpixel
+	move.b	1(%a0,%d7.l),%d0		| transrev16/tran2edie: mov al, byte [edi+pend+1]	;getpixel
 	.else
-	move.b	1(%a0),%d0			| transrev16/tran2edie: mov ah, byte [edi+pend+1]	;getpixel
+	move.b	1(%a0,%d7.l),%d0		| transrev16/tran2edie: mov ah, byte [edi+pend+1]	;getpixel
 	lsl.w	#8,%d0
 	move.b	(%a5,%d3.l),%d0			| transrev17/tran2pald: mov al, byte [edx+palookup2]
 	.endif
-	move.b	(%a6,%d0.l),%d1			| tran2trad: mov bl, byte [eax+_transluc]
-	move.b	%d1,1(%a0)			| tran2edif: mov byte [edi+pend+1-320], bl	;drawpixel
+	move.b	(%a6,%d0.l),1(%a0,%d7.l)	| tran2trad: mov bl, byte [eax+_transluc] / tran2edif: mov byte [edi+pend+1-320], bl	;drawpixel
 	add.l	%a1,%d7				| fixchaint2e: add edi, 320
-	add.l	%a1,%a0
 	bcc.w	begintvline2\rev		| jnc short begintvline2
 
 endtvline2\rev:
@@ -1334,18 +1293,15 @@ tvlineasm2:
 
 	move.l	ARG(0,11),%d5			| mov ebp, eax
 
-	move.l	ARG(1,11),%d0
-	move.l	%d0,tran2inca			| mov dword [tran2inca+2], ebx
-	move.l	asm1,%d0
-	move.l	%d0,tran2incb			| mov dword [tran2incb+2], eax
+	move.l	ARG(1,11),tran2inca	| mov dword [tran2inca+2], ebx
+	move.l	asm1,tran2incb		| mov dword [tran2incb+2], eax
 
 	move.l	ARG(2,11),%a2			| bufplc1
 	move.l	ARG(3,11),%a3			| bufplc2
 	move.l	ARG(4,11),%d4
-	move.l	ARG(5,11),%a0
-
-	move.l	%a0,%d7				| sub edi, pend
-	sub.l	asm2,%d7			| tran2edia-f: pend, pend-320, pend+1...
+	move.l	ARG(5,11),%d7
+	move.l	asm2,%a0			| tran2edia-f: pend, pend-320, pend+1...
+	sub.l	%a0,%d7				| sub edi, pend
 	move.l	fixchain,%a1			| fixchaint2a-e
 
 	move.l	tran2shra,%d6
@@ -1436,12 +1392,13 @@ setupslopevlin:
 	| d0: recip/yinc temp, then  d7: 32-logy (slopmach2)
 	|     inner count (eax, cl)  a0: videopos (ebp)
 	| d1: temp (ebx)             a1: slopaloffs+4 (esp, slopmach4)
-	| d2: cnt (ebx, asm4)        a2: palette pointer from the table
+	| d2: mask (slopmach7)       a2: palette pointer from the table
+	| cnt (ebx) is counted down in asm4
 	| d3: temp (edx)             a3: pinc (slopmach5)
 	| d4: xplc (esi)             a4: bufplc (slopmach3)
 	| d5: yplc (edi)             a5: yinc (eax)
 	| d6: 32-logx-logy           a6: xinc (ecx)
-	|     (slopmach1)            fp0: z
+	|     (slopmach1)            fp0: z, fp1: z step (asm2)
 	ALIGN
 slopevlin:
 	CDECLBEGIN	%d2-%d7/%a2-%a6
@@ -1450,14 +1407,15 @@ slopevlin:
 	move.l	ARG(1,11),%d1
 	move.l	ARG(2,11),%a1			| sub ecx, esp / mov dword [slopmach4+3], ecx
 	addq.l	#4,%a1
-	move.l	ARG(3,11),%d2
+	move.l	ARG(3,11),asm4			| mov dword [asm4], ebx
 	move.l	ARG(4,11),%d4
 	move.l	ARG(5,11),%d5
 
 	fmove.l	asm3,%fp0			| fild dword [asm3]
+	fmove.s	asm2,%fp1
 	move.l	slopmach5,%a3
 	sub.l	%a3,%a0				| slopmach6: lea ebp, [eax-pinc]
-	fadd.s	asm2,%fp0			| fadd dword [asm2]
+	fadd.x	%fp1,%fp0			| fadd dword [asm2]
 
 	move.l	%d1,asm1			| mov dword [asm1], ebx
 	lsl.l	#3,%d1				| shl ebx, 3
@@ -1472,23 +1430,17 @@ slopevlin:
 	move.l	slopmach3,%a4
 	move.l	slopmach1,%d6
 	move.l	slopmach2,%d7
-						| mov ebx, edx (cnt is in d2)
+	move.l	slopmach7,%d2
 	ALIGN
 bigslopeloop:
-	fmove.s	%fp0,fpuasm			| fst dword [fpuasm]
-
-	move.l	fpuasm,%d0			| mov eax, dword [fpuasm]
+	fmove.s	%fp0,%d0			| fst dword [fpuasm] / mov eax, dword [fpuasm]
 	add.l	%d0,%d0				| add eax, eax
 	subx.l	%d3,%d3				| sbb edx, edx
-	move.l	%d0,%d1				| mov ecx, eax
-	rol.l	#8,%d1				| shr ecx, 24
-	and.l	#255,%d1
-	and.l	#0x00ffe000,%d0			| and eax, 00ffe000h
-	lsr.l	#8,%d0				| shr eax, 11
-	lsr.l	#3,%d0
+	bfextu	%d0{#0:#8},%d1			| mov ecx, eax / shr ecx, 24
+	bfextu	%d0{#8:#11},%d0			| and eax, 00ffe000h / shr eax, 11
 	subq.b	#2,%d1				| sub cl, 2
 	and.b	#31,%d1
-	move.l	(reciptable,%d0.l),%d0		| mov eax, dword [reciptable+eax]
+	move.l	(reciptable,%d0.l*4),%d0	| mov eax, dword [reciptable+eax]
 	lsr.l	%d1,%d0				| shr eax, cl
 	eor.l	%d3,%d0				| xor eax, edx
 	move.l	asm1,%d3			| mov edx, dword [asm1]
@@ -1501,12 +1453,12 @@ bigslopeloop:
 	muls.l	%d3,%d0				| imul eax, edx
 	move.l	%d0,%a5
 
-	fadd.s	asm2,%fp0			| fadd dword [asm2]
+	fadd.x	%fp1,%fp0			| fadd dword [asm2]
 
 	moveq	#BITSOFPRECISIONPOW,%d0		| mov cl, BITSOFPRECISIONPOW
-	cmp.l	#BITSOFPRECISIONPOW,%d2		| cmp ebx, BITSOFPRECISIONPOW
-	bge.b	slopeskipmin			| jl short slopeskipmin
-	move.l	%d2,%d0				| mov cl, bl
+	cmp.l	asm4,%d0			| cmp ebx, BITSOFPRECISIONPOW
+	ble.b	slopeskipmin			| jl short slopeskipmin
+	move.l	asm4,%d0			| mov cl, bl
 slopeskipmin:
 
 	| eax: yinc.............
@@ -1524,20 +1476,19 @@ beginnerslopeloop:
 	lsr.l	%d6,%d1				| slopmach1: shr ebx, 32-logx-logy
 	add.l	%a6,%d4				| add esi, ecx
 	lsr.l	%d7,%d3				| slopmach2: shr edx, 32-logy
-	and.l	slopmach7,%d1			| slopmach7: and ebx, mask
+	and.l	%d2,%d1				| slopmach7: and ebx, mask
 	add.l	%a5,%d5				| add edi, eax
-	add.l	%a3,%a0				| slopmach5: add ebp, pinc
-	add.l	%d3,%d1
-	move.b	(%a4,%d1.l),%d3			| slopmach3: mov dl, byte [ebx+edx+ptr]
 	move.l	-(%a1),%a2			| slopmach4: mov ebx, dword [esp+off] / sub esp, 4
-	move.b	(%a2,%d3.l),%d1			| mov al, byte [ebx+edx] ;tptr
-	move.b	%d1,(%a0)			| mov [ebp], al
+	add.l	%d3,%d1
+	add.l	%a3,%a0				| slopmach5: add ebp, pinc
+	move.b	(%a4,%d1.l),%d3			| slopmach3: mov dl, byte [ebx+edx+ptr]
 	move.l	%d4,%d1				| mov ebx, esi
+	move.b	(%a2,%d3.l),(%a0)		| mov al, byte [ebx+edx] ;tptr / mov [ebp], al
 	move.l	%d5,%d3				| mov edx, edi
 	subq.l	#1,%d0				| dec cl
 	bne.b	beginnerslopeloop		| jnz short beginnerslopeloop
 
-	subq.l	#BITSOFPRECISIONPOW,%d2		| mov ebx, dword [asm4] / sub ebx, BITSOFPRECISIONPOW
+	subq.l	#BITSOFPRECISIONPOW,asm4	| sub ebx, BITSOFPRECISIONPOW
 	bgt.w	bigslopeloop			| jg near bigslopeloop
 
 						| ffree st0: fp0 is caller saved
@@ -1557,16 +1508,11 @@ slopmach7:	.long	0
 
 	| eax=xlo inc, ebx=ylo inc, ecx=xhi*tilesizy+yhi inc, edx=palookup, esi=tilesizy
 	.macro	SETUPRHLINE m1, m2, m3, m4, m5
-	move.l	ARG(0,0),%d0
-	move.l	%d0,\m1
-	move.l	ARG(1,0),%d0
-	move.l	%d0,\m2
-	move.l	ARG(2,0),%d0
-	move.l	%d0,\m3
-	move.l	ARG(3,0),%d0
-	move.l	%d0,\m4
-	move.l	ARG(4,0),%d0
-	move.l	%d0,\m5
+	move.l	ARG(0,0),\m1
+	move.l	ARG(1,0),\m2
+	move.l	ARG(2,0),\m3
+	move.l	ARG(3,0),\m4
+	move.l	ARG(4,0),\m5
 	rts
 	.endm
 
@@ -1585,9 +1531,10 @@ setuprhlineasm4:
 	| esp:
 	|
 	| d0: 4 pixels (eax)       d7: tilesizy (rmach5)
-	| d1: bufplc (ebx)         a0: videopos (edi+vidcntoffs)
-	| d2: texel (ecx)          a1: cnt (edi)
-	| d3: xlo (edx)            a2: copy of d1 for the texel load
+	| d1: offset from bufplc   a0: videopos (edi+vidcntoffs)
+	|     (ebx)                a1: cnt (edi)
+	| d2: texel (ecx)          a2: bufplc
+	| d3: xlo (edx)
 	| d4: ylo (esi)            a3: palookup (rmach4)
 	| d5: tempvar (ebp)        a4: xlo inc (rmach1)
 	| d6: xhi*tilesizy+yhi+ycarry (rmach3)
@@ -1595,7 +1542,8 @@ setuprhlineasm4:
 	.macro	RHLINEBEGIN m1, m2, m3, m4, m5
 	CDECLBEGIN	%d2-%d7/%a2-%a5
 	move.l	ARG(0,10),%a1
-	move.l	ARG(1,10),%d1
+	move.l	ARG(1,10),%a2
+	moveq	#0,%d1
 	move.l	ARG(3,10),%d3
 	move.l	ARG(4,10),%d4
 	move.l	ARG(5,10),%a0
@@ -1632,11 +1580,9 @@ rhlineasm4:
 
 	ALIGN
 startrhline1:
-	move.l	%d1,%a2
-	move.b	(%a2),%d2			| mov cl, byte [ebx]		;bufplc
+	move.b	(%a2,%d1.l),%d2			| mov cl, byte [ebx]		;bufplc
 	RHSTEP					| rmach1e, rmach2e, rmach3e, rmach5e
-	move.b	(%a3,%d2.l),%d0			| rmach4e: mov al, byte [ecx+palookup]
-	move.b	%d0,-(%a0)			| rmach6b: mov byte [edi+vidcntoffs], al
+	move.b	(%a3,%d2.l),-(%a0)		| rmach4e: mov al, byte [ecx+palookup] / rmach6b: mov byte [edi+vidcntoffs], al
 	subq.l	#1,%a1				| dec edi
 	move.l	%a1,%d5
 	and.l	#3,%d5				| test edi, 3
@@ -1645,16 +1591,14 @@ startrhline1:
 	beq.w	endrhline			| jz near endrhline
 
 begrhline:
-	move.l	%d1,%a2
-	move.b	(%a2),%d2			| mov cl, byte [ebx]		;bufplc
+	move.b	(%a2,%d1.l),%d2			| mov cl, byte [ebx]		;bufplc
 	RHSTEP					| rmach1a, rmach2a, rmach3a, rmach5a
-	move.l	%d1,%a2
 
 	sub.l	%a4,%d3				| rmach1b: sub edx, xlo
 	subx.l	%d5,%d5				| sbb ebp, ebp
 	move.b	(%a3,%d2.l),%d0			| rmach4a: mov ah, byte [ecx+palookup]
 	ror.l	#8,%d0
-	move.b	(%a2),%d2			| mov cl, byte [ebx]		;bufplc
+	move.b	(%a2,%d1.l),%d2			| mov cl, byte [ebx]		;bufplc
 	sub.l	%a5,%d4				| rmach2b: sub esi, ylo
 	subx.l	%d6,%d1				| rmach3b: sbb ebx, xhi*tilesizy + yhi+ycarry
 	and.l	%d7,%d5				| rmach5b: and ebp, tilesizy
@@ -1662,16 +1606,14 @@ begrhline:
 	ror.l	#8,%d0				| shl eax, 16
 	sub.l	%d5,%d1				| sub ebx, ebp
 
-	move.l	%d1,%a2
-	move.b	(%a2),%d2			| mov cl, byte [ebx]		;bufplc
+	move.b	(%a2,%d1.l),%d2			| mov cl, byte [ebx]		;bufplc
 	RHSTEP					| rmach1c, rmach2c, rmach3c, rmach5c
-	move.l	%d1,%a2
 
 	sub.l	%a4,%d3				| rmach1d: sub edx, xlo
 	subx.l	%d5,%d5				| sbb ebp, ebp
 	move.b	(%a3,%d2.l),%d0			| rmach4c: mov ah, byte [ecx+palookup]
 	ror.l	#8,%d0
-	move.b	(%a2),%d2			| mov cl, byte [ebx]		;bufplc
+	move.b	(%a2,%d1.l),%d2			| mov cl, byte [ebx]		;bufplc
 	sub.l	%a5,%d4				| rmach2d: sub esi, ylo
 	subx.l	%d6,%d1				| rmach3d: sbb ebx, xhi*tilesizy + yhi+ycarry
 	and.l	%d7,%d5				| rmach5d: and ebp, tilesizy
@@ -1705,8 +1647,7 @@ rmhlineasm4:
 						| predecremented video pointer
 	ALIGN
 begrmhline:
-	move.l	%d1,%a2
-	move.b	(%a2),%d2			| mov cl, byte [ebx]		;bufplc
+	move.b	(%a2,%d1.l),%d2			| mov cl, byte [ebx]		;bufplc
 	sub.l	%a4,%d3				| rmmach1: sub edx, xlo
 	subx.l	%d5,%d5				| sbb ebp, ebp
 	sub.l	%a5,%d4				| rmmach2: sub esi, ylo
@@ -1715,8 +1656,7 @@ begrmhline:
 	subq.l	#1,%a0
 	cmp.b	#255,%d2			| cmp cl, 255
 	beq.b	rmskip
-	move.b	(%a3,%d2.l),%d0			| rmmach4: mov al, byte [ecx+palookup]
-	move.b	%d0,(%a0)			| rmmach6: mov byte [edi+vidcntoffs], al
+	move.b	(%a3,%d2.l),(%a0)		| rmmach4: mov al, byte [ecx+palookup] / rmmach6: mov byte [edi+vidcntoffs], al
 rmskip:
 	sub.l	%d5,%d1				| sub ebx, ebp
 	subq.l	#1,%a1				| dec edi
@@ -1745,8 +1685,7 @@ setupqrhlineasm4:
 	move.l	%d1,qrmach2a			| qrmach2a, qrmach2b
 	move.l	%d2,qrmach3a			| qrmach3a, qrmach3b
 
-	move.l	ARG(3,1),%d0
-	move.l	%d0,qrmach4			| qrmach4a-e
+	move.l	ARG(3,1),qrmach4	| qrmach4a-e
 
 	move.l	(%sp)+,%d2
 	rts
@@ -1761,24 +1700,27 @@ setupqrhlineasm4:
 	| ebp:  ?
 	| esp:
 	|
-	| d0: 4 pixels (eax)       d7: -(xhi*tilesizy+yhi) (qrmach7)
-	| d1: bufplc (ebx)         a0: videopos (edi)
-	| d2: texel (ecx)          a1: cnt (ebp)
-	| d3: texel (edx)          a2: copy of d1 for the texel loads
+	| d0: 4 pixels (eax)       a0: videopos (edi)
+	| d1: offset from bufplc   a1: cnt (ebp)
+	|     (ebx)                a2: bufplc
+	| d2: texel (ecx)          a6: bufplc-(xhi*tilesizy+yhi) (qrmach7)
+	| d3: texel (edx)
 	| d4: ylo (esi)            a3: palookup (qrmach4)
 	| d5: xhi*tilesizy+yhi inc a4: 2*ylo inc (qrmach2a)
 	|     (qrmach3e)           a5: ylo inc (qrmach2e)
 	| d6: 2*(xhi*tilesizy+yhi)+c (qrmach3a)
 	ALIGN
 qrhlineasm4:
-	CDECLBEGIN	%d2-%d7/%a2-%a5
-	move.l	ARG(0,10),%a1
-	move.l	ARG(1,10),%d1
-	move.l	ARG(4,10),%d4
-	move.l	ARG(5,10),%a0
+	CDECLBEGIN	%d2-%d7/%a2-%a6
+	move.l	ARG(0,11),%a1
+	move.l	ARG(1,11),%a2
+	moveq	#0,%d1
+	move.l	ARG(4,11),%d4
+	move.l	ARG(5,11),%a0
 	move.l	qrmach3e,%d5
 	move.l	qrmach3a,%d6
-	move.l	qrmach7,%d7
+	move.l	%a2,%a6
+	add.l	qrmach7,%a6			| qrmach7a, qrmach7b
 	move.l	qrmach4,%a3
 	move.l	qrmach2a,%a4
 	move.l	qrmach2e,%a5
@@ -1793,13 +1735,11 @@ qrhlineasm4:
 
 	ALIGN
 startqrhline1:
-	move.l	%d1,%a2
-	move.b	(%a2),%d2			| mov cl, byte [ebx]		;bufplc
+	move.b	(%a2,%d1.l),%d2			| mov cl, byte [ebx]		;bufplc
 	sub.l	%a5,%d4				| qrmach2e: sub esi, ylo
 	subx.l	%d5,%d1				| qrmach3e: sbb ebx, xhi*tilesizy + yhi+ycarry
 	subq.l	#1,%a1				| dec ebp
-	move.b	(%a3,%d2.l),%d0			| qrmach4e: mov al, byte [ecx+palookup]
-	move.b	%d0,-(%a0)			| dec edi / mov byte [edi], al	;vidcntoffs
+	move.b	(%a3,%d2.l),-(%a0)		| qrmach4e: mov al, byte [ecx+palookup] / dec edi / mov byte [edi], al	;vidcntoffs
 	move.l	%a1,%d0
 	and.l	#3,%d0				| test ebp, 3
 	bne.b	startqrhline1			| jnz short startqrhline1
@@ -1807,28 +1747,25 @@ startqrhline1:
 	beq.b	endqrhline			| jz short endqrhline
 
 skipqrhline1:
-	move.l	%d1,%a2
-	move.b	(%a2),%d2			| mov cl, byte [ebx]		;bufplc
+	move.b	(%a2,%d1.l),%d2			| mov cl, byte [ebx]		;bufplc
 	ALIGN
 begqrhline:
-	move.b	(%a2,%d7.l),%d3			| qrmach7a: mov dl, byte [ebx-inc]	;bufplc
+	move.b	(%a6,%d1.l),%d3			| qrmach7a: mov dl, byte [ebx-inc]	;bufplc
 	sub.l	%a4,%d4				| qrmach2a: sub esi, 2*ylo
 	subx.l	%d6,%d1				| qrmach3a: sbb ebx, 2*(xhi*tilesizy + yhi)+c
 	move.b	(%a3,%d2.l),%d0			| qrmach4a: mov ah, byte [ecx+palookup]
 	ror.l	#8,%d0
 	move.b	(%a3,%d3.l),%d0			| qrmach4b: mov al, byte [edx+palookup]
 	ror.l	#8,%d0				| shl eax, 16
-	move.l	%d1,%a2
-	move.b	(%a2),%d2			| mov cl, byte [ebx]		;bufplc
-	move.b	(%a2,%d7.l),%d3			| qrmach7b: mov dl, byte [ebx-inc]	;bufplc
+	move.b	(%a2,%d1.l),%d2			| mov cl, byte [ebx]		;bufplc
+	move.b	(%a6,%d1.l),%d3			| qrmach7b: mov dl, byte [ebx-inc]	;bufplc
 	sub.l	%a4,%d4				| qrmach2b: sub esi, 2*ylo
 	subx.l	%d6,%d1				| qrmach3b: sbb ebx, 2*(xhi*tilesizy + yhi)+c
 	move.b	(%a3,%d2.l),%d0			| qrmach4c: mov ah, byte [ecx+palookup]
 	ror.l	#8,%d0
 	move.b	(%a3,%d3.l),%d0			| qrmach4d: mov al, byte [edx+palookup]
 	ror.l	#8,%d0
-	move.l	%d1,%a2
-	move.b	(%a2),%d2			| mov cl, byte [ebx]		;bufplc
+	move.b	(%a2,%d1.l),%d2			| mov cl, byte [ebx]		;bufplc
 	move.l	%d0,-(%a0)			| sub edi, 4 / mov dword [edi], eax
 	subq.l	#4,%a1				| sub ebp, 4
 	move.l	%a1,%d0
@@ -1836,7 +1773,7 @@ begqrhline:
 
 endqrhline:
 
-	CDECLEND	%d2-%d7/%a2-%a5
+	CDECLEND	%d2-%d7/%a2-%a6
 	rts
 
 	.bss
@@ -1863,10 +1800,8 @@ qrmach7:	.long	0
 	| eax=bytes per line, ebx=palookup
 	ALIGN
 setupdrawslab:
-	move.l	ARG(0,0),%d0
-	move.l	%d0,voxbpl			| voxbpl1-8
-	move.l	ARG(1,0),%d0
-	move.l	%d0,voxpal			| voxpal1-8
+	move.l	ARG(0,0),voxbpl		| voxbpl1-8
+	move.l	ARG(1,0),voxpal		| voxpal1-8
 	rts
 
 	| eax=dx, ebx=v, ecx=dy, edx=vi, esi=vptr, edi=p
@@ -1886,28 +1821,27 @@ setupdrawslab:
 	move.l	%d1,%d6				| push ebx
 	move.l	%d2,%d7				| push ecx
 	move.l	%a0,%a1				| push edi
+	.if \w == 1
+	moveq	#0,%d0				| xor eax, eax
+	.endif
 \label:
 	move.l	%d6,%d5				| mov ebp, ebx
 	add.l	%d3,%d6				| add ebx, edx
 	clr.w	%d5
 	swap	%d5				| shr ebp, 16
+	.if \w != 1
 	moveq	#0,%d0				| xor eax, eax
+	.endif
 	move.b	(%a2,%d5.l),%d0			| mov al, byte [esi+ebp]
-	move.b	(%a3,%d0.l),%d0			| voxpal: mov al, byte [eax+palookup]
 	.if \w == 1
-	move.b	%d0,(%a1)			| mov byte [edi], al
+	move.b	(%a3,%d0.l),(%a1)		| voxpal: mov al, byte [eax+palookup] / mov byte [edi], al
 	.elseif \w == 2
-	move.b	%d0,%d5				| mov ah, al
-	lsl.w	#8,%d5
-	move.b	%d0,%d5
-	move.w	%d5,(%a1)			| mov word [edi], ax
+	move.b	(%a3,%d0.l),%d0			| voxpal: mov al, byte [eax+palookup]
+	mulu.w	#0x0101,%d0			| mov ah, al
+	move.w	%d0,(%a1)			| mov word [edi], ax
 	.else
-	move.b	%d0,%d5				| mov ah, al
-	lsl.w	#8,%d5				| shl eax, 8
-	move.b	%d0,%d5				| mov al, ah
-	move.w	%d5,%d0				| shl eax, 8
-	swap	%d0
-	move.w	%d5,%d0				| mov al, ah
+	move.b	(%a3,%d0.l),%d0			| voxpal: mov al, byte [eax+palookup]
+	mulu.l	#0x01010101,%d0			| mov ah, al / shl eax, 8 / mov al, ah / shl eax, 8 / mov al, ah
 	move.l	%d0,(%a1)			| mov dword [edi], eax
 	.endif
 	add.l	%a4,%a1				| voxbpl: add edi, bpl
@@ -2021,13 +1955,13 @@ voxend:
 	| d1: loplc1 (ebx)         d6: loinc (loinc1-4)
 	| d2: loplc2 (ecx)         d7: cnt (cl, ch)
 	| d3: hiplc1 (edx)         a0: vidplc (edi)
-	| d4: hiplc2 (esi)         a2: copy of d3/d4 for the loads
+	| d4: hiplc2 (esi)         a2: rptr
 	ALIGN
 stretchhline:
 	CDECLBEGIN	%d2-%d7/%a2
 	move.l	ARG(1,7),%d1
 	move.l	ARG(2,7),%d7
-	move.l	ARG(4,7),%d4
+	move.l	ARG(4,7),%a2
 	move.l	ARG(5,7),%a0
 
 	move.l	%d1,%d0				| mov eax, ebx
@@ -2037,7 +1971,7 @@ stretchhline:
 	ext.l	%d0
 	move.l	%d1,%d2				| and ecx, 0000ffffh / or ecx, ebx
 
-	add.l	%d0,%d4				| add esi, eax
+	move.l	%d0,%d4				| add esi, eax
 	move.l	ARG(3,7),%d0			| mov eax, edx
 	move.l	%d4,%d3				| mov edx, esi
 
@@ -2057,23 +1991,19 @@ stretchhline:
 						| inc ch
 
 begloop:
-	move.l	%d3,%a2
-	move.b	(%a2),%d0			| mov al, [edx]
+	move.b	(%a2,%d3.l),%d0			| mov al, [edx]
 	sub.l	%d6,%d1				| loinc1: sub ebx, loinc
 	subx.l	%d5,%d3				| sbb edx, ebp
-	move.l	%d4,%a2
 	lsl.l	#8,%d0
-	move.b	(%a2),%d0			| mov ah, [esi]
+	move.b	(%a2,%d4.l),%d0			| mov ah, [esi]
 	sub.l	%d6,%d2				| loinc2: sub ecx, loinc
 	subx.l	%d5,%d4				| sbb esi, ebp
 	lsl.l	#8,%d0				| shl eax, 16
-	move.l	%d3,%a2
 	sub.l	%d6,%d1				| loinc3: sub ebx, loinc
-	move.b	(%a2),%d0			| mov al, [edx]
+	move.b	(%a2,%d3.l),%d0			| mov al, [edx]
 	subx.l	%d5,%d3				| sbb edx, ebp
-	move.l	%d4,%a2
 	lsl.l	#8,%d0
-	move.b	(%a2),%d0			| mov ah, [esi]
+	move.b	(%a2,%d4.l),%d0			| mov ah, [esi]
 	sub.l	%d6,%d2				| loinc4: sub ecx, loinc
 	subx.l	%d5,%d4				| sbb esi, ebp
 	move.l	%d0,-(%a0)			| sub edi, 4 / mov [edi], eax

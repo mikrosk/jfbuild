@@ -255,4 +255,21 @@ const float m68k_pow2[64] = {
 	0x1p56f, 0x1p57f, 0x1p58f, 0x1p59f, 0x1p60f, 0x1p61f, 0x1p62f, 0x1p63f
 };
 
+static unsigned int m68k_savedfpcr;
+
+void m68k_setfpuround(void)
+{
+	unsigned int fpcr;
+
+	__asm__ __volatile__ ("fmove.l %%fpcr,%0" : "=d" (fpcr));
+	m68k_savedfpcr = fpcr;
+	fpcr = (fpcr & ~0x30) | 0x10;
+	__asm__ __volatile__ ("fmove.l %0,%%fpcr" : : "d" (fpcr));
+}
+
+void m68k_restorefpuround(void)
+{
+	__asm__ __volatile__ ("fmove.l %0,%%fpcr" : : "d" (m68k_savedfpcr));
+}
+
 #endif
