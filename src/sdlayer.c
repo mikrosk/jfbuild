@@ -31,7 +31,6 @@ static char wintitle[256] = "";
 // video
 static SDL_Surface *sdl_surface;	// The video surface.
 static SDL_Surface *sdl_appicon;
-static unsigned char *frame;
 static float curshadergamma = 1.f, cursysgamma = -1.f;
 static int desktopw, desktoph;
 static char displayname[128];
@@ -578,9 +577,8 @@ void getvalidmodes(void)
 
 static void shutdownvideo(void)
 {
-	if (frame) {
-		free(frame);
-		frame = NULL;
+	if (sdl_surface && sdl_surface->locked) {
+		SDL_UnlockSurface(sdl_surface);
 	}
 
 	// The video surface is owned by SDL and freed on the next mode set or at SDL_Quit().
@@ -636,19 +634,17 @@ int setvideomode(int xdim, int ydim, int bitspp, int fullsc)
 	}
 
 	{
-		int i, j, pitch;
+		int i, j;
 
-		// Round up to a multiple of 4.
-		pitch = (((xdim|1) + 4) & ~3);
-
-		frame = (unsigned char *) malloc(pitch * ydim);
-		if (!frame) {
-			buildputs("Unable to allocate framebuffer\n");
+		// The engine draws straight into the surface, so it stays locked
+		// between frames; showframe() releases it around the flip.
+		if (SDL_MUSTLOCK(sdl_surface) && SDL_LockSurface(sdl_surface)) {
+			buildprintf("Error locking video surface: %s\n", SDL_GetError());
 			return -1;
 		}
 
-		frameplace = (intptr_t) frame;
-		bytesperline = pitch;
+		frameplace = (intptr_t) sdl_surface->pixels;
+		bytesperline = sdl_surface->pitch;
 		imageSize = bytesperline * ydim;
 		numpages = 1;
 
@@ -698,27 +694,20 @@ const char *getdisplayname(int display)
 //
 void showframe(void)
 {
-	unsigned char *pixels, *in;
-	int y;
-
 	if (!sdl_surface) return;
-
-	if (SDL_MUSTLOCK(sdl_surface) && SDL_LockSurface(sdl_surface)) {
-		debugprintf("Could not lock surface: %s\n", SDL_GetError());
-		return;
-	}
-
-	pixels = (unsigned char *)sdl_surface->pixels;
-	in = frame;
-	for (y = yres - 1; y >= 0; y--) {
-		memcpy(pixels, in, xres);
-		pixels += sdl_surface->pitch;
-		in += bytesperline;
-	}
 
 	if (SDL_MUSTLOCK(sdl_surface)) SDL_UnlockSurface(sdl_surface);
 
 	SDL_Flip(sdl_surface);
+
+	if (SDL_MUSTLOCK(sdl_surface)) {
+		if (SDL_LockSurface(sdl_surface)) {
+			debugprintf("Could not lock surface: %s\n", SDL_GetError());
+			return;
+		}
+		// A double-buffered hardware surface points at the other page now.
+		frameplace = (intptr_t) sdl_surface->pixels;
+	}
 }
 
 
