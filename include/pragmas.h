@@ -4026,11 +4026,23 @@ void qinterpolatedown16short (void *bufptr, int num, int val, int add);
 #endif
 
 void clearbuf(void* d, int c, int a);
+#if defined(__MINT__)
+// memmove, not memcpy: cache1d.c deletes cache entries by copying the rest
+// of cac[] one entry down, so source and destination overlap
+static inline void copybuf(void* s, void* d, int c) { if (c > 0) memmove(d, s, c * 4); }
+#else
 void copybuf(void* s, void* d, int c);
+#endif
 void swapbuf4(void* a, void* b, int c);
 
+#if defined(__MINT__)
+// every caller fills with one byte repeated four times
+static inline void clearbufbyte(void *D, int c, int a) { if (c > 0) memset(D, a & 0xff, c); }
+static inline void copybufbyte(void *S, void *D, int c) { if (c > 0) memmove(D, S, c); }
+#else
 void clearbufbyte(void *D, int c, int a);
 void copybufbyte(void *S, void *D, int c);
+#endif
 void copybufreverse(void *S, void *D, int c);
 
 #endif

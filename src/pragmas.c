@@ -200,11 +200,13 @@ void clearbuf(void *d, int c, int a)
 	while ((c--) > 0) *(p++) = a;
 }
 
+#if !defined(__MINT__)
 void copybuf(void *s, void *d, int c)
 {
 	int *p = (int*)s, *q = (int*)d;
 	while ((c--) > 0) *(q++) = *(p++);
 }
+#endif
 
 void swapbuf4(void *a, void *b, int c)
 {
@@ -218,6 +220,7 @@ void swapbuf4(void *a, void *b, int c)
 	}
 }
 
+#if !defined(__MINT__)
 void clearbufbyte(void *D, int c, int a)
 {
 	char *p = (char*)D;
@@ -235,6 +238,7 @@ void copybufbyte(void *S, void *D, int c)
 	char *p = (char*)S, *q = (char*)D;
 	while((c--) > 0) *(q++) = *(p++);
 }
+#endif
 
 void copybufreverse(void *S, void *D, int c)
 {
