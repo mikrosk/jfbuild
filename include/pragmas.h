@@ -3945,17 +3945,29 @@ static inline void qinterpolatedown16(void *eax, int ecx, int edx, int esi)
 	register int _edx __asm__ ("d1") = edx;
 	register int _esi __asm__ ("d2") = esi;
 	__asm__ volatile (
-		"moveq   #16,%%d3" "\n\t"
 		"tst.l   %%d0" "\n\t"
-		"ble.b   2f" "\n\t"
-		"1:" "\n\t" // q1
+		"ble.b   3f" "\n\t"
+		"moveq   #16,%%d3" "\n\t"
+		"lsr.l   #1,%%d0" "\n\t"
+		"bcc.b   1f" "\n\t"
 		"move.l  %%d1,%%d4" "\n\t"
 		"asr.l   %%d3,%%d4" "\n\t"
-		"add.l   %%d2,%%d1" "\n\t"
 		"move.l  %%d4,(%%a0)+" "\n\t"
+		"add.l   %%d2,%%d1" "\n\t"
+		"1:" "\n\t" // q1
 		"subq.l  #1,%%d0" "\n\t"
-		"bne.b   1b" "\n\t"
-		"2:" // end
+		"bmi.b   3f" "\n\t"
+		"2:" "\n\t" // q2
+		"move.l  %%d1,%%d4" "\n\t"
+		"asr.l   %%d3,%%d4" "\n\t"
+		"move.l  %%d4,(%%a0)+" "\n\t"
+		"add.l   %%d2,%%d1" "\n\t"
+		"move.l  %%d1,%%d4" "\n\t"
+		"asr.l   %%d3,%%d4" "\n\t"
+		"move.l  %%d4,(%%a0)+" "\n\t"
+		"add.l   %%d2,%%d1" "\n\t"
+		"dbra    %%d0,2b" "\n\t"
+		"3:" // end
 		: "=r" (_eax), "=r" (_ecx), "=r" (_edx)
 		: "r" (_eax), "r" (_ecx), "r" (_edx), "r" (_esi)
 		: "d3", "d4", "memory", "cc"
@@ -3970,41 +3982,39 @@ static inline void qinterpolatedown16short(void *eax, int ecx, int edx, int esi)
 	register int _esi __asm__ ("d2") = esi;
 	__asm__ volatile (
 		"tst.l   %%d0" "\n\t" // TODO can this check be skipped?
-		"ble.b   3f" "\n\t"
-		"moveq   #16,%%d3" "\n\t"
+		"ble.b   4f" "\n\t"
 		"move.l  %%a0,%%d4" "\n\t"
 		"btst    #1,%%d4" "\n\t"
 		"beq.b   1f" "\n\t"
 		"move.l  %%d1,%%d4" "\n\t"
-		"lsr.l   %%d3,%%d4" "\n\t"
-		"add.l   %%d2,%%d1" "\n\t"
+		"swap    %%d4" "\n\t"
 		"move.w  %%d4,(%%a0)+" "\n\t"
+		"add.l   %%d2,%%d1" "\n\t"
 		"subq.l  #1,%%d0" "\n\t"
-		"beq.b   3f" "\n\t"
+		"beq.b   4f" "\n\t"
 		"1:" "\n\t" // q1
-		"subq.l  #2,%%d0" "\n\t"
-		"bpl.b   2f" "\n\t"
-		"lsr.l   %%d3,%%d1" "\n\t"
-		"move.w  %%d1,(%%a0)" "\n\t"
-		"bra.b   3f" "\n\t"
+		"move.l  %%d0,%%d3" "\n\t"
+		"lsr.l   #1,%%d3" "\n\t"
+		"subq.l  #1,%%d3" "\n\t"
+		"bmi.b   3f" "\n\t"
 		"2:" "\n\t" // q2
 		"move.l  %%d1,%%d4" "\n\t"
 		"add.l   %%d2,%%d1" "\n\t"
-		"move.l  %%d1,%%d5" "\n\t"
-		"lsr.l   %%d3,%%d5" "\n\t"
-		"move.w  %%d5,%%d4" "\n\t"
+		"swap    %%d1" "\n\t"
+		"move.w  %%d1,%%d4" "\n\t"
+		"swap    %%d1" "\n\t"
 		"add.l   %%d2,%%d1" "\n\t"
 		"move.l  %%d4,(%%a0)+" "\n\t"
-		"subq.l  #2,%%d0" "\n\t"
-		"bpl.b   2b" "\n\t"
+		"dbra    %%d3,2b" "\n\t"
+		"3:" "\n\t"
 		"btst    #0,%%d0" "\n\t"
-		"beq.b   3f" "\n\t"
-		"lsr.l   %%d3,%%d1" "\n\t"
+		"beq.b   4f" "\n\t"
+		"swap    %%d1" "\n\t"
 		"move.w  %%d1,(%%a0)" "\n\t"
-		"3:" // end
+		"4:" // end
 		: "=r" (_eax), "=r" (_ecx), "=r" (_edx)
 		: "r" (_eax), "r" (_ecx), "r" (_edx), "r" (_esi)
-		: "d3", "d4", "d5", "memory", "cc"
+		: "d3", "d4", "memory", "cc"
 	);
 }
 
