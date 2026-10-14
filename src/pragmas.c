@@ -196,8 +196,69 @@ void qinterpolatedown16short(void *bufptr, int num, int val, int add)
 
 void clearbuf(void *d, int c, int a)
 {
+#if defined(__GNUC__) && defined(__m68k__) && !defined(__mcoldfire__) && USE_ASM
+	// Fills from the end down like MiNTLib's memset: movem for 256-byte blocks,
+	// then four stores per pass, entered at the right offset for the rest.
+	register void *_d __asm__ ("a0") = d;
+	register int _c __asm__ ("d0") = c;
+	register int _a __asm__ ("d1") = a;
+
+	__asm__ __volatile__ (
+		"tst.l	%%d0\n\t"
+		"ble.s	9f\n\t"
+		"move.l	%%d2,-(%%sp)\n\t"
+		"lea	(%%a0,%%d0.l*4),%%a0\n\t"	// end of the buffer
+		"move.l	%%d0,%%d2\n\t"
+		"lsr.l	#6,%%d2\n\t"			// 256-byte blocks
+		"beq.s	2f\n\t"
+		"movem.l	%%d3-%%d7/%%a2-%%a6,-(%%sp)\n\t"
+		"move.l	%%d1,%%d3\n\t"
+		"move.l	%%d1,%%d4\n\t"
+		"move.l	%%d1,%%d5\n\t"
+		"move.l	%%d1,%%d6\n\t"
+		"move.l	%%d1,%%d7\n\t"
+		"move.l	%%d1,%%a2\n\t"
+		"move.l	%%d1,%%a3\n\t"
+		"move.l	%%d1,%%a4\n\t"
+		"move.l	%%d1,%%a5\n\t"
+		"move.l	%%d1,%%a6\n\t"
+		"1:\n\t"
+		"movem.l	%%d1/%%d3-%%d7/%%a2-%%a6,-(%%a0)\n\t"	// 5 * 44 + 36 = 256 bytes
+		"movem.l	%%d1/%%d3-%%d7/%%a2-%%a6,-(%%a0)\n\t"
+		"movem.l	%%d1/%%d3-%%d7/%%a2-%%a6,-(%%a0)\n\t"
+		"movem.l	%%d1/%%d3-%%d7/%%a2-%%a6,-(%%a0)\n\t"
+		"movem.l	%%d1/%%d3-%%d7/%%a2-%%a6,-(%%a0)\n\t"
+		"movem.l	%%d1/%%d3-%%d7/%%a2-%%a4,-(%%a0)\n\t"
+		"subq.l	#1,%%d2\n\t"
+		"bne.s	1b\n\t"
+		"movem.l	(%%sp)+,%%d3-%%d7/%%a2-%%a6\n\t"
+		"2:\n\t"
+		"and.w	#63,%%d0\n\t"			// longs left
+		"beq.s	8f\n\t"
+		"move.w	%%d0,%%d2\n\t"
+		"neg.w	%%d2\n\t"
+		"and.w	#3,%%d2\n\t"			// stores to skip in the first pass
+		"subq.w	#1,%%d0\n\t"
+		"lsr.w	#2,%%d0\n\t"			// passes - 1
+		"add.w	%%d2,%%d2\n\t"			// a move.l Dn,-(An) is 2 bytes
+		"jmp	(2,%%pc,%%d2.w)\n\t"
+		"3:\n\t"
+		"move.l	%%d1,-(%%a0)\n\t"
+		"move.l	%%d1,-(%%a0)\n\t"
+		"move.l	%%d1,-(%%a0)\n\t"
+		"move.l	%%d1,-(%%a0)\n\t"
+		"dbra	%%d0,3b\n\t"
+		"8:\n\t"
+		"move.l	(%%sp)+,%%d2\n\t"
+		"9:"
+		: "+a" (_d), "+d" (_c)
+		: "d" (_a)
+		: "memory", "cc"
+	);
+#else
 	int *p = (int*)d;
 	while ((c--) > 0) *(p++) = a;
+#endif
 }
 
 #if !defined(__MINT__)
