@@ -303,8 +303,40 @@ void copybufbyte(void *S, void *D, int c)
 
 void copybufreverse(void *S, void *D, int c)
 {
+#if defined(__GNUC__) && defined(__m68k__) && !defined(__mcoldfire__) && USE_ASM
+	register void *_s __asm__ ("a0") = S;
+	register void *_d __asm__ ("a1") = D;
+	register int _c __asm__ ("d0") = c;
+
+	__asm__ __volatile__ (
+		"addq.l	#1,%%a0\n\t"			// one past the next source byte
+		"lsr.l	#1,%%d0\n\t"
+		"bcc.s	1f\n\t"
+		"move.b	-(%%a0),(%%a1)+\n\t"
+		"1:\n\t"
+		"lsr.l	#1,%%d0\n\t"
+		"bcc.s	2f\n\t"
+		"move.w	-(%%a0),%%d1\n\t"
+		"ror.w	#8,%%d1\n\t"
+		"move.w	%%d1,(%%a1)+\n\t"
+		"2:\n\t"
+		"bra.s	4f\n\t"
+		"3:\n\t"
+		"move.l	-(%%a0),%%d1\n\t"
+		"ror.w	#8,%%d1\n\t"
+		"swap	%%d1\n\t"
+		"ror.w	#8,%%d1\n\t"
+		"move.l	%%d1,(%%a1)+\n\t"
+		"4:\n\t"
+		"dbra	%%d0,3b"
+		: "+a" (_s), "+a" (_d), "+d" (_c)
+		:
+		: "d1", "memory", "cc"
+	);
+#else
 	char *p = (char*)S, *q = (char*)D;
 	while((c--) > 0) *(q++) = *(p--);
+#endif
 }
 
 #endif
