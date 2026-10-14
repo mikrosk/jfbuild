@@ -3947,13 +3947,10 @@ static inline void qinterpolatedown16(void *eax, int ecx, int edx, int esi)
 	__asm__ volatile (
 		"moveq   #16,%%d3" "\n\t"
 		"tst.l   %%d0" "\n\t"
-		"bne.b   1f" "\n\t"
-		"lsr.l   %%d3,%%d1" "\n\t"
-		"move.l  %%d1,(%%a0)" "\n\t"
-		"bra.b   2f" "\n\t"
+		"ble.b   2f" "\n\t"
 		"1:" "\n\t" // q1
 		"move.l  %%d1,%%d4" "\n\t"
-		"lsr.l   %%d3,%%d4" "\n\t"
+		"asr.l   %%d3,%%d4" "\n\t"
 		"add.l   %%d2,%%d1" "\n\t"
 		"move.l  %%d4,(%%a0)+" "\n\t"
 		"subq.l  #1,%%d0" "\n\t"
@@ -3973,7 +3970,7 @@ static inline void qinterpolatedown16short(void *eax, int ecx, int edx, int esi)
 	register int _esi __asm__ ("d2") = esi;
 	__asm__ volatile (
 		"tst.l   %%d0" "\n\t" // TODO can this check be skipped?
-		"beq.b   3f" "\n\t"
+		"ble.b   3f" "\n\t"
 		"moveq   #16,%%d3" "\n\t"
 		"move.l  %%a0,%%d4" "\n\t"
 		"btst    #1,%%d4" "\n\t"
