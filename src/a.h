@@ -95,7 +95,9 @@ extern long drawslab(long,long,long,long,long,long);
 
 #elif ((defined(__GNUC__) && (defined(__i386__) || defined(__m68k__))) || (defined(_MSC_VER) && defined(_M_IX86))) && USE_ASM	// __WATCOMC__
 
-#if !defined(_WIN32)
+#if defined(__m68k__) && defined(__FASTCALL__)
+#define __cdecl __attribute__((cdecl))
+#elif !defined(_WIN32)
 #define __cdecl
 #endif
 
