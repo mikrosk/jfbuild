@@ -1052,6 +1052,9 @@ static int buildkeytranslationtable(void)
 	MAP(SDLK_F11,       0x57);
 	MAP(SDLK_F12,       0x58);
 	MAP(SDLK_NUMLOCK,   0x45);
+#ifdef __MINT__
+	MAP(SDLK_HELP,      0x45);	// Atari keyboards have no NumLock, which opens the console
+#endif
 	MAP(SDLK_CAPSLOCK,  0x3a);
 	MAP(SDLK_SCROLLOCK, 0x46);
 	MAP(SDLK_RSHIFT,    0x36);
